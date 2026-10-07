@@ -1,0 +1,11 @@
+# Build output
+bin/
+obj/
+
+# Decompiled game / third-party mod code used for research. Not ours to redistribute.
+.research/
+
+# IDE
+.vs/
+.idea/
+*.user

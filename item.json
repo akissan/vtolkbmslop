@@ -1,0 +1,16 @@
+{
+  "$schema": "https://gitlab.com/vtolvr-mods/ModLoader/-/raw/release/schema.json",
+  "Title": "Mouse Stick",
+  "Description": "Virtual joystick for flat-screen play. Tap CTRL to toggle: mouse deflection from the centre of an on-screen box drives pitch and roll, Q/E drive rudder, LMB fires the stick trigger. Designed to work alongside FlatScreen 3 and BYOJoystick.\n\nClient-side only.",
+  "Tags": [
+    "ClientSide"
+  ],
+  "PreviewImageUrl": "",
+  "MetaData": {
+    "DllName": "MouseStick.dll",
+    "AllowLoadOnStart": true,
+    "ShowOnMainList": true,
+    "DllHash": ""
+  },
+  "DependenciesIds": []
+}
