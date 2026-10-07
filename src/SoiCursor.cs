@@ -97,12 +97,38 @@ namespace MouseStick
             Current = Kind.None;
         }
 
+        // After a middle-mouse re-centre, pressing the wheel usually nudges the mouse. Movement is ignored while the
+        // wheel is held and then until the mouse has clearly moved (RecenterDeadzonePx in total) or the window ends.
+        private const float RecenterDeadzonePx = 25f;
+        private const float RecenterDeadzoneSeconds = 0.6f;
+        private bool _recenterSettling;
+        private float _recenterAt;
+        private Vector2 _recenterTravel;
+
         // Every frame while G is held. px = this frame's mouse movement (+x right, +y up); lmb = left button held.
         public void Update(Vector2 px, bool lmb, float tgpSensitivity, float cursorSensitivity)
         {
             RefreshSoi();
             if (Current == Kind.None)
                 return;
+
+            if (_recenterSettling)
+            {
+                if (Input.GetMouseButton(2))
+                {
+                    _recenterAt = Time.unscaledTime; // window starts when the wheel is let go
+                    _recenterTravel = Vector2.zero;
+                    px = Vector2.zero;
+                }
+                else
+                {
+                    _recenterTravel += px;
+                    if (_recenterTravel.magnitude < RecenterDeadzonePx && Time.unscaledTime - _recenterAt < RecenterDeadzoneSeconds)
+                        px = Vector2.zero;
+                    else
+                        _recenterSettling = false; // a deliberate move (or the window ran out): resume from this frame
+                }
+            }
 
             if (Current == Kind.Tgp)
             {
@@ -254,6 +280,9 @@ namespace MouseStick
         //  radar -> drop the lock; ARAD -> deselect the target.
         public void Recenter()
         {
+            _recenterSettling = true;
+            _recenterAt = Time.unscaledTime;
+            _recenterTravel = Vector2.zero;
             try
             {
                 switch (Current)

@@ -68,7 +68,7 @@ namespace MouseStick
 
         private static VRInteractable _hoverButton;
         private static VRTouchScreenInteractable _hoverTouch;
-        private static readonly Vector3[] _hoverCorners = new Vector3[4]; // world-space outline of the hovered hitbox
+        private static readonly Vector3[] _hoverCorners = new Vector3[4]; // hovered hitbox outline, in _outlineTf's space
 
         private static VRInteractable _pressed;
         private static VRTouchScreenInteractable _touching;
@@ -151,14 +151,14 @@ namespace MouseStick
         // Screen-space corners of the hovered hitbox (GUI coordinates, y down), for the outline.
         public static bool TryGetHoverOutline(Vector2[] corners)
         {
-            if (_hoverButton == null && _hoverTouch == null)
+            if ((_hoverButton == null && _hoverTouch == null) || _outlineTf == null)
                 return false;
             Camera cam = GetCamera();
             if (cam == null)
                 return false;
             for (int i = 0; i < 4; i++)
             {
-                Vector3 sp = WorldToScreen(cam, _hoverCorners[i]);
+                Vector3 sp = WorldToScreen(cam, _outlineTf.TransformPoint(_hoverCorners[i]));
                 if (sp.z <= 0f)
                     return false;
                 corners[i] = new Vector2(sp.x, Screen.height - sp.y);
@@ -242,6 +242,7 @@ namespace MouseStick
             public float Dist;
             public float Area;
             public Vector3 C0, C1, C2, C3;
+            public Transform Tf; // the hitbox's plane; the outline is stored relative to it
             public string Shape;
         }
 
@@ -497,6 +498,7 @@ namespace MouseStick
             hit.C1 = t.position + (right - up) * radius;
             hit.C2 = t.position + (right + up) * radius;
             hit.C3 = t.position + (-right + up) * radius;
+            hit.Tf = t;
             return true;
         }
 
@@ -510,6 +512,7 @@ namespace MouseStick
             hit.C1 = t.TransformPoint(new Vector3(r.xMax, r.yMin, localZ));
             hit.C2 = t.TransformPoint(new Vector3(r.xMax, r.yMax, localZ));
             hit.C3 = t.TransformPoint(new Vector3(r.xMin, r.yMax, localZ));
+            hit.Tf = t;
             return true;
         }
 
@@ -545,7 +548,7 @@ namespace MouseStick
             {
                 Hit h = Hits[best];
                 _hoverButton = h.Button;
-                SetOutline(h.C0, h.C1, h.C2, h.C3);
+                SetOutline(h.Tf, h.C0, h.C1, h.C2, h.C3);
                 HoverInfo = $"{ButtonName(h.Button)}\n{h.Button.name} · {h.Shape} {(h.C1 - h.C0).magnitude * 100f:0.0} × {(h.C3 - h.C0).magnitude * 100f:0.0} cm";
                 if (Hits.Count > 1)
                     HoverInfo += $" · {Hits.Count - 1} more under cursor";
@@ -565,18 +568,26 @@ namespace MouseStick
                 _hoverTouch = t;
                 HoverInfo = $"Touch / drag area\n{t.name} · {r.width * t.screenRect.lossyScale.x * 100f:0.0} × {r.height * t.screenRect.lossyScale.y * 100f:0.0} cm";
                 Transform s = t.screenRect;
-                SetOutline(s.TransformPoint(new Vector3(r.xMin, r.yMin, 0f)), s.TransformPoint(new Vector3(r.xMax, r.yMin, 0f)),
+                SetOutline(s, s.TransformPoint(new Vector3(r.xMin, r.yMin, 0f)), s.TransformPoint(new Vector3(r.xMax, r.yMin, 0f)),
                            s.TransformPoint(new Vector3(r.xMax, r.yMax, 0f)), s.TransformPoint(new Vector3(r.xMin, r.yMax, 0f)));
             }
         }
 
-        private static void SetOutline(Vector3 a, Vector3 b, Vector3 c, Vector3 d)
+        // The outline is kept relative to the element's transform, not as world points: the cockpit flies at
+        // hundreds of m/s, so world points captured on hover drift off the button while it's held.
+        private static void SetOutline(Transform tf, Vector3 a, Vector3 b, Vector3 c, Vector3 d)
         {
-            _hoverCorners[0] = a;
-            _hoverCorners[1] = b;
-            _hoverCorners[2] = c;
-            _hoverCorners[3] = d;
+            _outlineTf = tf;
+            _hoverCorners[0] = tf.InverseTransformPoint(a);
+            _hoverCorners[1] = tf.InverseTransformPoint(b);
+            _hoverCorners[2] = tf.InverseTransformPoint(c);
+            _hoverCorners[3] = tf.InverseTransformPoint(d);
         }
+
+        private static Transform _outlineTf;
+
+        // While LMB holds a screen button: seconds held so far (for the hold timer), else 0.
+        public static float PressHeldSeconds => _pressed != null ? Time.unscaledTime - _pressStart : 0f;
 
         private static void ClearHover()
         {

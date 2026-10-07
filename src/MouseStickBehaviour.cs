@@ -800,7 +800,11 @@ namespace MouseStick
                 for (int i = 0; i < 4; i++)
                     DrawLine(_outline[i], _outline[(i + 1) % 4], 1.5f, c);
             }
-            if (S.showScreenTooltip && ScreenPointer.HoverInfo != null)
+            // Hold timer for screen buttons (e.g. MFD layout presets save after 2 s held, load on a short press).
+            float held = ScreenPointer.PressHeldSeconds;
+            if (held > 0.3f)
+                DrawTooltip($"held {held:0.0} s");
+            else if (S.showScreenTooltip && ScreenPointer.HoverInfo != null)
                 DrawTooltip(ScreenPointer.HoverInfo);
 
             if (_toast != null && Time.unscaledTime < _toastUntil)
