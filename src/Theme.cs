@@ -2,25 +2,54 @@ using UnityEngine;
 
 namespace VirtualJoystick
 {
-    // Look of the settings window: dark grey base, borderless grey panels with hard corners and padding (stepped
-    // shades instead of outlines), light grey-blue text, saturated sky-blue accent. Built once from scratch.
+    // Look of the settings window, after a dark cockpit MFD: near-black base with a slight green cast, borderless
+    // green-grey panels with hard corners and padding (stepped shades instead of outlines), light grey-green text,
+    // the aircraft HUD's green as accent and its font (VeraMono).
+    // Built from scratch, and once more when the HUD font turns up.
     internal static class Theme
     {
-        public static readonly Color Main = Hex(0x1C2024, 0.95f);         // window background
-        public static readonly Color Section = Hex(0x262B31, 0.85f);      // section / group panels
-        public static readonly Color Control = Hex(0x323941, 0.95f);      // buttons, card headers and bodies
-        public static readonly Color ControlHover = Hex(0x3B434C, 0.97f);
-        public static readonly Color ControlActive = Hex(0x444D57, 1f);
-        public static readonly Color KeyBg = Hex(0x14171A, 0.95f);        // key binding buttons: darker, no border
-        public static readonly Color KeyHover = Hex(0x1D2126, 0.97f);
-        public static readonly Color Text = Hex(0xC9D6E2, 1f);            // grey with a little light blue
-        public static readonly Color Muted = Hex(0x8996A3, 1f);
-        public static readonly Color Accent = Hex(0x29B6FF, 1f);          // saturated sky blue
-        public static readonly Color CheckOffFill = Hex(0x14171A, 1f);
-        public static readonly Color CheckBorder = Hex(0x6A747E, 1f);
+        public static readonly Color Main = Hex(0x181C19, 0.95f);         // window background
+        public static readonly Color Section = Hex(0x222823, 0.85f);      // section / group panels
+        public static readonly Color Control = Hex(0x2D352E, 0.95f);      // buttons, card headers and bodies
+        public static readonly Color ControlHover = Hex(0x364038, 0.97f);
+        public static readonly Color ControlActive = Hex(0x3F4A41, 1f);
+        public static readonly Color KeyBg = Hex(0x111512, 0.95f);        // key binding buttons: darker, no border
+        public static readonly Color KeyHover = Hex(0x1A1F1B, 0.97f);
+        public static readonly Color Text = Hex(0xCCDACB, 1f);            // grey with a little green
+        public static readonly Color Muted = Hex(0x8A9989, 1f);
+        // The green of the aircraft HUD and helmet symbology (the game's most used UI green). Also the screen hover
+        // outline, the overlay title and messages.
+        public static readonly Color HudGreen = new Color(0.67f, 1f, 0.08f, 1f);
+        public static readonly Color Accent = HudGreen;
+        public static readonly Color CheckOffFill = Hex(0x111512, 1f);
+        public static readonly Color CheckBorder = Hex(0x6A786B, 1f);
         public static readonly Color Warning = Hex(0xF2C14E, 1f);
 
-        public const int FontSize = 14;
+        // 13 rather than 14: the monospaced HUD font runs wider than the default one.
+        public const int FontSize = 13;
+
+        // The font of the game's HUD and helmet display text. It's loaded with the game's shared assets, so it may not
+        // exist yet at startup: looked up again every couple of seconds until found (null until then).
+        private const string HudFontName = "VeraMono";
+        private static Font _hudFont;
+        private static float _nextHudFontLookup;
+
+        public static Font HudFont
+        {
+            get
+            {
+                if (_hudFont == null && Time.unscaledTime >= _nextHudFontLookup)
+                {
+                    _nextHudFontLookup = Time.unscaledTime + 2f;
+                    foreach (var f in Resources.FindObjectsOfTypeAll<Font>())
+                        if (f != null && f.name == HudFontName)
+                            _hudFont = f;
+                }
+                return _hudFont;
+            }
+        }
+
+        private static bool _builtWithHudFont;
 
         // One spacing unit for every gap: window edges, between tabs, panels, cards, rows and buttons. The scrollbar is
         // one gap wide, with one gap on each side of it (to the content, and the window edge).
@@ -39,7 +68,8 @@ namespace VirtualJoystick
         {
             get
             {
-                if (_skin == null)
+                // Rebuilt once the HUD font is found, if it wasn't there the first time.
+                if (_skin == null || (!_builtWithHudFont && HudFont != null))
                     Build();
                 return _skin;
             }
@@ -47,14 +77,17 @@ namespace VirtualJoystick
 
         private static void Build()
         {
-            Font font = GUI.skin.font;
+            Font font = HudFont;
+            _builtWithHudFont = font != null;
+            if (font == null)
+                font = GUI.skin.font;
             _skin = ScriptableObject.CreateInstance<GUISkin>();
             _skin.hideFlags = HideFlags.HideAndDontSave;
             _skin.font = font;
 
             Texture2D control = Solid(Control), controlHover = Solid(ControlHover), controlActive = Solid(ControlActive);
             Texture2D accent = Solid(Accent), accentHover = Solid(Color.Lerp(Accent, Color.white, 0.15f));
-            Color onAccentText = Hex(0x0B1A24, 1f);
+            Color onAccentText = Hex(0x111A05, 1f);
 
             Window = new GUIStyle
             {
@@ -122,7 +155,7 @@ namespace VirtualJoystick
             Panel = new GUIStyle { padding = new RectOffset(10, 10, 10, 10), margin = new RectOffset(0, 0, 0, Gap) };
             Panel.normal.background = Solid(Section);
 
-            // Thin dark track, blue handle overflowing it vertically.
+            // Thin dark track, green handle overflowing it vertically.
             Slider = new GUIStyle { fixedHeight = 6f, margin = new RectOffset(4, 4, 10, 10) };
             Slider.normal.background = Solid(KeyBg);
             SliderThumb = new GUIStyle { fixedWidth = 10f, overflow = new RectOffset(0, 0, 6, 6) };
@@ -146,9 +179,9 @@ namespace VirtualJoystick
             _skin.textField = new GUIStyle(KeyButton) { alignment = TextAnchor.MiddleLeft };
             _skin.scrollView = new GUIStyle();
             _skin.verticalScrollbar = new GUIStyle { fixedWidth = Gap, margin = new RectOffset(Gap, 0, 0, 0) };
-            _skin.verticalScrollbar.normal.background = Solid(Hex(0x14171A, 0.7f));
+            _skin.verticalScrollbar.normal.background = Solid(Hex(0x111512, 0.7f));
             _skin.verticalScrollbarThumb = new GUIStyle { fixedWidth = Gap };
-            _skin.verticalScrollbarThumb.normal.background = Solid(Hex(0x4A535D, 1f));
+            _skin.verticalScrollbarThumb.normal.background = Solid(Hex(0x485449, 1f));
             _skin.verticalScrollbarUpButton = new GUIStyle();
             _skin.verticalScrollbarDownButton = new GUIStyle();
             _skin.horizontalScrollbar = new GUIStyle();

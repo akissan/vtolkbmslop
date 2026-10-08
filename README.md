@@ -43,9 +43,9 @@ T-55, ...). Jets without touchscreen displays are left entirely to FlatScreen 3.
 FlatScreen 3 tests a sphere around each element's pivot point, and UI pivots are often at a corner
 or edge, so its hitboxes miss the drawn button. Here the mouse ray is tested against the element's
 real rectangle (the same `useRect` / `useRectTransform` hitbox the game uses for a VR finger), and
-the hitbox under the cursor is outlined. Clicking presses the element the way a finger does; holding
-LMB on a touchscreen and moving drags it. Both can be switched off under F8 → Cockpit screens
-(`handleScreens`, `showScreenHitbox`).
+the hitbox under the cursor is outlined in HUD green, with its labels turned the same green. Clicking
+presses the element the way a finger does; holding LMB on a touchscreen and moving drags it. Screen
+handling can be switched off under F8 → Cockpit screens (`handleScreens`).
 
 ## Key bindings (F8 → Bindings)
 

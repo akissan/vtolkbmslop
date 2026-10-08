@@ -302,8 +302,6 @@ namespace VirtualJoystick
             if (SoiMode && !wasSoiMode)
             {
                 _soi.Begin(GetPlayerVehicle());
-                if (_soi.Current == SoiCursor.Kind.None)
-                    ShowToast("No SOI page selected");
             }
             else if (!SoiMode && wasSoiMode)
             {
@@ -489,8 +487,6 @@ namespace VirtualJoystick
                 SoiMode = true;
                 FindPlayerControls();
                 _soi.Begin(vehicle);
-                if (_soi.Current == SoiCursor.Kind.None)
-                    ShowToast("No SOI page selected");
                 Cursor.visible = false;
                 Win32Mouse.Capture();
                 _skipNextDelta = true;
@@ -555,6 +551,7 @@ namespace VirtualJoystick
 
         private void LateUpdate()
         {
+            ScreenPointer.LateUpdate();
             if (!IsActive && KeyboardFlying)
                 ApplyStickVisual(_output);
             if (!IsActive && SoiMode)
@@ -972,18 +969,24 @@ namespace VirtualJoystick
                 }
             }
 
-            // Outline of the screen element under the cursor: the real hitbox ScreenPointer will press.
-            if (S.showScreenHitbox && ScreenPointer.TryGetHoverOutline(_outline))
+            // Outline of the screen element under the cursor: the real hitbox ScreenPointer will press. Always shown:
+            // it's the only sign of what's hovered. Layout preset held (tap loads, a long hold saves): the outline
+            // fills left to right, full = saved.
+            float hold = ScreenPointer.PresetHoldProgress;
+            if (ScreenPointer.TryGetHoverOutline(_outline))
             {
-                Color c = ScreenPointer.HoverIsTouchSurface ? new Color(0.4f, 0.8f, 1f, 0.35f) : new Color(0.4f, 0.9f, 1f, 0.9f);
+                Color green = ScreenPointer.HoverColor;
+                Color c = ScreenPointer.HoverIsTouchSurface ? new Color(green.r, green.g, green.b, 0.35f) : new Color(green.r, green.g, green.b, 0.9f);
+                if (hold > 0f)
+                {
+                    Vector2 bottom = Vector2.Lerp(_outline[0], _outline[1], hold);
+                    Vector2 top = Vector2.Lerp(_outline[3], _outline[2], hold);
+                    FillQuad(_outline[0], bottom, top, _outline[3], new Color(c.r, c.g, c.b, 0.7f));
+                }
                 for (int i = 0; i < 4; i++)
                     DrawLine(_outline[i], _outline[(i + 1) % 4], 1.5f, c);
             }
-            // Hold timer for screen buttons (e.g. MFD layout presets save after 2 s held, load on a short press).
-            float held = ScreenPointer.PressHeldSeconds;
-            if (held > 0.3f)
-                DrawTooltip($"held {held:0.0} s");
-            else if (S.showScreenTooltip && ScreenPointer.HoverInfo != null)
+            if (S.showScreenTooltip && ScreenPointer.HoverInfo != null)
                 DrawTooltip(ScreenPointer.HoverInfo);
 
             if (_toast != null && Time.unscaledTime < _toastUntil)
@@ -1021,8 +1024,8 @@ namespace VirtualJoystick
         private static Color PassiveColor(float a) => new Color(0.7f, 0.7f, 0.7f, a);
         private string SoiTitle => _soi.Label;
 
-        // Overlay title and toast messages: opaque bold green, "* " prefix.
-        private static readonly Color TitleColor = new Color(0.55f, 1f, 0.6f, 1f);
+        // Overlay title and toast messages: HUD green in the HUD's font, "* " prefix.
+        private static Color TitleColor => Theme.HudGreen;
 
         // Text line centred above the control area: 0 = overlay title, 1 = the line above it (toasts).
         private Rect TitleLine(int line)
@@ -1152,6 +1155,13 @@ namespace VirtualJoystick
                     fontStyle = FontStyle.Bold,
                 };
             }
+            // The HUD's font once it's loaded (the default bold font until then).
+            if (_labelStyle.font != Theme.HudFont && Theme.HudFont != null)
+            {
+                _labelStyle.font = Theme.HudFont;
+                _labelStyle.fontStyle = FontStyle.Normal;
+                _labelStyle.fontSize = 14;
+            }
         }
 
         private void Fill(Rect r, Color color)
@@ -1179,6 +1189,37 @@ namespace VirtualJoystick
             GUIUtility.RotateAroundPivot(Mathf.Atan2(d.y, d.x) * Mathf.Rad2Deg, from);
             Fill(new Rect(from.x, from.y - width * 0.5f, len, width), color);
             GUI.matrix = saved;
+        }
+
+        private static Material _quadMaterial;
+
+        // Solid quad between four GUI points (y down), any shape: the screen outline is a perspective quad.
+        private void FillQuad(Vector2 a, Vector2 b, Vector2 c, Vector2 d, Color color)
+        {
+            if (_quadMaterial == null)
+            {
+                Shader shader = Shader.Find("Hidden/Internal-Colored");
+                if (shader == null)
+                    return;
+                _quadMaterial = new Material(shader) { hideFlags = HideFlags.HideAndDontSave };
+                _quadMaterial.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
+                _quadMaterial.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+                _quadMaterial.SetInt("_Cull", (int)UnityEngine.Rendering.CullMode.Off);
+                _quadMaterial.SetInt("_ZWrite", 0);
+                _quadMaterial.SetInt("_ZTest", (int)UnityEngine.Rendering.CompareFunction.Always);
+            }
+            float h = Screen.height;
+            GL.PushMatrix();
+            GL.LoadPixelMatrix();
+            _quadMaterial.SetPass(0);
+            GL.Begin(GL.QUADS);
+            GL.Color(color);
+            GL.Vertex3(a.x, h - a.y, 0f);
+            GL.Vertex3(b.x, h - b.y, 0f);
+            GL.Vertex3(c.x, h - c.y, 0f);
+            GL.Vertex3(d.x, h - d.y, 0f);
+            GL.End();
+            GL.PopMatrix();
         }
 
         private void DrawRing(Vector2 c, float radius, Color color, float width = 1.5f)
@@ -1211,11 +1252,12 @@ namespace VirtualJoystick
             GUI.Label(r, text, _tooltipStyle);
         }
 
+        // Plain text, no shadow or outline, at the HUD labels' 85% opacity.
+        private const float HudTextOpacity = 0.85f;
+
         private void DrawLabel(Rect r, string text, Color color)
         {
-            _labelStyle.normal.textColor = new Color(0f, 0f, 0f, color.a * 0.8f);
-            GUI.Label(new Rect(r.x + 1f, r.y + 1f, r.width, r.height), text, _labelStyle);
-            _labelStyle.normal.textColor = color;
+            _labelStyle.normal.textColor = new Color(color.r, color.g, color.b, color.a * HudTextOpacity);
             GUI.Label(r, text, _labelStyle);
         }
     }

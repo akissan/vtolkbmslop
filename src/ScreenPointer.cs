@@ -156,6 +156,7 @@ namespace VirtualJoystick
         public static void Reset()
         {
             ClearHover();
+            RestoreTint();
             EndPress();
             EndTouch();
             Buttons.Clear();
@@ -184,6 +185,68 @@ namespace VirtualJoystick
         }
 
         public static bool HoverIsTouchSurface => _hoverButton == null && _hoverTouch != null;
+
+        // Hover colour: the aircraft HUD's green.
+        public static Color HoverColor => Theme.HudGreen;
+
+        // ------------------------------------------------------------------ hovered label tint
+
+        // Labels of the hovered button, drawn in HoverColor; each label's own colour is put back when the hover ends.
+        private static readonly List<UnityEngine.UI.Graphic> Tinted = new List<UnityEngine.UI.Graphic>();
+        private static readonly List<Color> TintedOriginal = new List<Color>();
+        private static VRInteractable _tintedFor;
+
+        // After the game's Update, so a page that sets its label colours every frame doesn't undo the tint.
+        public static void LateUpdate()
+        {
+            VRInteractable target = _hoverButton;
+            if (target != _tintedFor)
+            {
+                RestoreTint();
+                _tintedFor = target;
+            }
+            if (target == null || !Visuals.TryGetValue(target, out ElementVisuals vis))
+                return;
+            foreach (var t in vis.Texts)
+                Tint(t);
+            foreach (var t in vis.Tmps)
+                Tint(t);
+        }
+
+        private static Color TintFor(Color current) => new Color(HoverColor.r, HoverColor.g, HoverColor.b, current.a);
+
+        private static bool SameRgb(Color a, Color b) =>
+            Mathf.Abs(a.r - b.r) < 0.002f && Mathf.Abs(a.g - b.g) < 0.002f && Mathf.Abs(a.b - b.b) < 0.002f;
+
+        private static void Tint(UnityEngine.UI.Graphic g)
+        {
+            if (g == null || !g.isActiveAndEnabled)
+                return;
+            Color now = g.color;
+            int i = Tinted.IndexOf(g);
+            if (i < 0)
+            {
+                Tinted.Add(g);
+                TintedOriginal.Add(now);
+            }
+            else if (!SameRgb(now, HoverColor))
+                TintedOriginal[i] = now; // the game recoloured it while hovered: that's the colour to go back to
+            g.color = TintFor(now);
+        }
+
+        private static void RestoreTint()
+        {
+            for (int i = 0; i < Tinted.Count; i++)
+            {
+                var g = Tinted[i];
+                // Only undo our own tint: if the game has set a colour since, leave it.
+                if (g != null && SameRgb(g.color, HoverColor))
+                    g.color = new Color(TintedOriginal[i].r, TintedOriginal[i].g, TintedOriginal[i].b, g.color.a);
+            }
+            Tinted.Clear();
+            TintedOriginal.Clear();
+            _tintedFor = null;
+        }
 
         // ------------------------------------------------------------------ candidates
 
@@ -214,13 +277,15 @@ namespace VirtualJoystick
             // Strictly the portal hierarchy (not "same canvas": some cockpits put physical controls under canvases too).
             var portals = vehicle.GetComponentsInChildren<MFDPortalManager>(true);
             // Layout preset buttons belong to the portals even where they sit outside the portal hierarchy.
-            var presets = new HashSet<VRInteractable>();
+            Presets.Clear();
             foreach (var p in vehicle.GetComponentsInChildren<MFDPortalPresetButton>(true))
                 if (p.interactable != null)
-                    presets.Add(p.interactable);
+                    Presets[p.interactable] = p;
 
             bool OnSensorScreen(Component c) => c.GetComponentInParent<MFDPortalManager>(true) != null;
 
+            // Elements seen before keep their visuals (and cached hitbox); the hierarchy walk is done once each.
+            var oldVisuals = new Dictionary<VRInteractable, ElementVisuals>(Visuals);
             Visuals.Clear();
             if (portals.Length > 0)
             {
@@ -235,11 +300,11 @@ namespace VirtualJoystick
                 }
                 foreach (var v in vehicle.GetComponentsInChildren<VRInteractable>(true))
                 {
-                    if (Owned.Contains(v) || !(presets.Contains(v) || OnSensorScreen(v)))
+                    if (Owned.Contains(v) || !(Presets.ContainsKey(v) || OnSensorScreen(v)))
                         continue;
                     Buttons.Add(v);
                     Owned.Add(v);
-                    Visuals[v] = CollectVisuals(v);
+                    Visuals[v] = oldVisuals.TryGetValue(v, out ElementVisuals vis) ? vis : CollectVisuals(v);
                 }
             }
 
@@ -271,10 +336,12 @@ namespace VirtualJoystick
             public readonly List<UnityEngine.UI.Text> Texts = new List<UnityEngine.UI.Text>();
             public readonly List<TMPro.TMP_Text> Tmps = new List<TMPro.TMP_Text>();
             public readonly List<UnityEngine.UI.Graphic> Images = new List<UnityEngine.UI.Graphic>();
+            // Background panels that may frame the labels, nearest first: one list per hierarchy level (see PanelHitbox).
+            public readonly List<List<UnityEngine.UI.Image>> Panels = new List<List<UnityEngine.UI.Image>>();
 
             // Cached drawn hitbox, in Plane's local space (so it follows the element if the page moves).
             public bool Cached;
-            public string Kind;          // "text", "icon", or null (nothing drawn: fall back to rect/bounds/sphere)
+            public string Kind;          // "panel", "text", "icon", or null (nothing drawn: fall back to rect/bounds/sphere)
             public Transform Plane;
             public Rect Rect;
             public float CachedAt;
@@ -295,7 +362,7 @@ namespace VirtualJoystick
                 vis.CachedAt = Time.unscaledTime;
                 vis.TextSnapshot = SnapshotTexts(vis);
                 if (LabelHitbox(vis, out vis.Plane, out vis.Rect))
-                    vis.Kind = "text";
+                    vis.Kind = PanelHitbox(vis, vis.Plane, vis.Rect, out vis.Plane, out vis.Rect) ? "panel" : "text";
                 else if (IconHitbox(vis, out vis.Plane, out vis.Rect))
                     vis.Kind = "icon";
                 else
@@ -345,6 +412,9 @@ namespace VirtualJoystick
 
         private static bool HasSize(RectTransform rt) => rt.rect.width > 1e-4f && rt.rect.height > 1e-4f;
 
+        // How far up the hierarchy labels and background panels are looked for.
+        private const int MaxPanelLevels = 3;
+
         private static ElementVisuals CollectVisuals(VRInteractable v)
         {
             var vis = new ElementVisuals();
@@ -359,7 +429,60 @@ namespace VirtualJoystick
                 else
                     vis.Images.Add(g);
             }
+
+            // The button's scope: v's ancestors that hold no other screen element, so whatever they draw is this button's.
+            // Many buttons are a panel (background + border + labels) with the interactable as just one more child
+            // (SMS hardpoints, LASR SEEK, JOY SENS), so the labels and the panel sit beside it, not under it.
+            Transform scope = v.transform;
+            for (int i = 0; i < MaxPanelLevels; i++)
+            {
+                Transform p = scope.parent;
+                if (p == null || p.GetComponent<Canvas>() != null || p.GetComponent<MFDPortalPage>() != null || HoldsOtherElement(p, v))
+                    break;
+                scope = p;
+            }
+            if (vis.Texts.Count + vis.Tmps.Count == 0 && scope != v.transform)
+            {
+                foreach (var t in scope.GetComponentsInChildren<UnityEngine.UI.Text>(true))
+                    if (t.GetComponentInParent<VRInteractable>(true) == null)
+                        vis.Texts.Add(t);
+                foreach (var t in scope.GetComponentsInChildren<TMPro.TMP_Text>(true))
+                    if (t.GetComponentInParent<VRInteractable>(true) == null)
+                        vis.Tmps.Add(t);
+            }
+
+            // Panel candidates, level by level from the first label up to the scope: each level's own image and its
+            // direct children's plain images (no text on them).
+            Transform label = vis.Texts.Count > 0 ? vis.Texts[0].transform : vis.Tmps.Count > 0 ? vis.Tmps[0].transform : null;
+            if (label != null && label.IsChildOf(scope))
+            {
+                for (Transform t = label; t != null; t = t.parent)
+                {
+                    var level = new List<UnityEngine.UI.Image>();
+                    var own = t.GetComponent<UnityEngine.UI.Image>();
+                    if (own != null)
+                        level.Add(own);
+                    foreach (Transform c in t)
+                    {
+                        var img = c.GetComponent<UnityEngine.UI.Image>();
+                        if (img != null && c.GetComponent<UnityEngine.UI.Text>() == null && c.GetComponent<TMPro.TMP_Text>() == null)
+                            level.Add(img);
+                    }
+                    if (level.Count > 0)
+                        vis.Panels.Add(level);
+                    if (t == scope)
+                        break;
+                }
+            }
             return vis;
+        }
+
+        private static bool HoldsOtherElement(Transform t, VRInteractable v)
+        {
+            foreach (var other in t.GetComponentsInChildren<VRInteractable>(true))
+                if (other != v)
+                    return true;
+            return false;
         }
 
         // Exact extents of the glyphs a legacy Text actually drew, in its local space.
@@ -444,6 +567,55 @@ namespace VirtualJoystick
             return true;
         }
 
+        // A panel may be at most this many times the label's area: anything bigger is a page or panel group, not the button.
+        private const float MaxPanelToLabelArea = 12f;
+
+        // The button's background panel: at the nearest hierarchy level that has one, the smallest active image that
+        // encloses the label(s). That's the box the game draws as the button, so the hitbox is the whole button
+        // rather than just its text.
+        private static bool PanelHitbox(ElementVisuals vis, Transform labelPlane, Rect label, out Transform plane, out Rect rect)
+        {
+            plane = labelPlane;
+            rect = label;
+            float maxArea = WorldArea(labelPlane, label) * MaxPanelToLabelArea;
+            foreach (var level in vis.Panels)
+            {
+                float best = maxArea;
+                bool found = false;
+                foreach (var img in level)
+                {
+                    if (img == null || !img.isActiveAndEnabled || !HasSize(img.rectTransform))
+                        continue;
+                    RectTransform rt = img.rectTransform;
+                    float area = WorldArea(rt, rt.rect);
+                    if (area >= best || !Encloses(rt, rt.rect, labelPlane, label))
+                        continue;
+                    best = area;
+                    plane = rt;
+                    rect = rt.rect;
+                    found = true;
+                }
+                if (found)
+                    return true;
+            }
+            return false;
+        }
+
+        // Rect r (in t's plane) holds the centre of inner and nearly all of it (the label's padding may poke out).
+        private static bool Encloses(Transform t, Rect r, Transform innerTf, Rect inner)
+        {
+            var grown = Rect.MinMaxRect(r.xMin - r.width * 0.1f, r.yMin - r.height * 0.1f, r.xMax + r.width * 0.1f, r.yMax + r.height * 0.1f);
+            for (int k = 0; k < 4; k++)
+            {
+                var corner = new Vector3(k == 0 || k == 3 ? inner.xMin : inner.xMax, k < 2 ? inner.yMin : inner.yMax, 0f);
+                Vector3 p = t.InverseTransformPoint(innerTf.TransformPoint(corner));
+                if (!grown.Contains(new Vector2(p.x, p.y)))
+                    return false;
+            }
+            Vector3 c = t.InverseTransformPoint(innerTf.TransformPoint(inner.center));
+            return r.Contains(new Vector2(c.x, c.y));
+        }
+
         // Smallest visible non-text graphic of the element (an icon), for buttons without a label.
         private static bool IconHitbox(ElementVisuals vis, out Transform plane, out Rect rect)
         {
@@ -467,9 +639,9 @@ namespace VirtualJoystick
 
         // Hitbox = what you see, as close to the label as possible, so neighbouring buttons don't overlap.
         // (The buttons' own RectTransforms are often far bigger than the button: 12 x 12 cm on the F-45 MFDs.)
-        //  1. the drawn text label(s), padded a little;
+        //  1. the background panel around the label(s), else the drawn label(s), padded a little;
         //  2. else the smallest drawn icon;
-        //  3. else the element's own rect, 4. the game's rect bounds, 5. a sphere of `radius`.
+        //  3. else the game's own VR rect (useRect), 4. the element's RectTransform, 5. a sphere of `radius`.
         private static bool TryHit(VRInteractable v, Ray ray, out Hit hit)
         {
             hit = default;
@@ -484,16 +656,16 @@ namespace VirtualJoystick
                     return HitLocalRect(plane, drawn, 0f, ray, ref hit);
                 }
             }
-            if (t is RectTransform own && HasSize(own))
-            {
-                hit.Shape = "rect";
-                return HitLocalRect(t, own.rect, 0f, ray, ref hit);
-            }
             if (v.useRect)
             {
                 hit.Shape = "bounds";
                 var r = new Rect(v.rect.min.x, v.rect.min.y, v.rect.size.x, v.rect.size.y);
                 return HitLocalRect(t, r, v.rect.center.z, ray, ref hit);
+            }
+            if (t is RectTransform own && HasSize(own))
+            {
+                hit.Shape = "rect";
+                return HitLocalRect(t, own.rect, 0f, ray, ref hit);
             }
 
             // Sphere around the element (world units, like the VR finger check).
@@ -603,8 +775,22 @@ namespace VirtualJoystick
 
         private static Transform _outlineTf;
 
-        // While LMB holds a screen button: seconds held so far (for the hold timer), else 0.
-        public static float PressHeldSeconds => _pressed != null ? Time.unscaledTime - _pressStart : 0f;
+        // Layout preset buttons (tap = load, hold = save) and how long the game needs them held to save.
+        private static readonly Dictionary<VRInteractable, MFDPortalPresetButton> Presets = new Dictionary<VRInteractable, MFDPortalPresetButton>();
+        private static readonly FieldInfo SaveHoldTimeField = AccessTools.Field(typeof(MFDPortalPresetButton), "saveHoldTime");
+
+        // While LMB holds a layout preset button: 0..1 of the hold that saves the layout (1 = saved), else -1.
+        // Timed in game time, like the game's own save timer.
+        public static float PresetHoldProgress
+        {
+            get
+            {
+                if (_pressed == null || !Presets.TryGetValue(_pressed, out MFDPortalPresetButton preset) || preset == null)
+                    return -1f;
+                float needed = SaveHoldTimeField?.GetValue(preset) is float f ? f : 2f;
+                return needed <= 0f ? 1f : Mathf.Clamp01((Time.time - _pressStartGameTime) / needed);
+            }
+        }
 
         private static void ClearHover()
         {
@@ -657,12 +843,14 @@ namespace VirtualJoystick
         private static readonly MethodInfo WhileInteractingRoutine = AccessTools.Method(typeof(VRInteractable), "WhileInteractingRoutine");
 
         private static float _pressStart;
+        private static float _pressStartGameTime;
 
         private static void BeginPress(VRInteractable v)
         {
             LogClick(v);
             _pressed = v;
             _pressStart = Time.unscaledTime;
+            _pressStartGameTime = Time.time;
 
             var key = v.GetComponent<VRKeyboard.VRKey>();
             if (key != null)

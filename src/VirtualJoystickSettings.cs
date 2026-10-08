@@ -182,8 +182,8 @@ namespace VirtualJoystick
         // zoom, so aim gets finer as you zoom in.
         public float tgpSensitivity = 1f;
         // SOI cursor mode on radar / ARAD / map / TSD: at 1.0, 50 px of mouse moves the page's cursor as far as one second of
-        // full thumbstick does.
-        public float cursorSensitivity = 1f;
+        // full thumbstick does. Defaults to a third of that, which pans at a usable speed.
+        public float cursorSensitivity = 1f / 3f;
 
         // Middle mouse snaps the stick back to centre.
         public bool middleMouseRecenters = true;
@@ -206,8 +206,6 @@ namespace VirtualJoystick
         // Cockpit screens (MFD on-screen buttons, touchscreen drag) are clicked by this mod instead of FlatScreen 3,
         // using the game's real hitboxes. Off = leave them to FlatScreen 3.
         public bool handleScreens = true;
-        // Outline the on-screen hitbox under the cursor.
-        public bool showScreenHitbox = true;
         // Debug: tooltip next to the cursor naming the hovered screen element, its hitbox source and size.
         public bool showScreenTooltip = false;
 

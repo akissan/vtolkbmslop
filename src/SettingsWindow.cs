@@ -157,7 +157,6 @@ namespace VirtualJoystick
 
             BeginPanel("Cockpit screens");
             s.handleScreens = Toggle("Handle screen buttons & touch drag (not FlatScreen 3)", s.handleScreens);
-            s.showScreenHitbox = Toggle("Outline the screen hitbox under the cursor", s.showScreenHitbox);
             s.showScreenTooltip = Toggle("Debug tooltip: element name, hitbox source, size", s.showScreenTooltip);
             EndPanel();
         }
