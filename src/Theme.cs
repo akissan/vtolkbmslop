@@ -320,7 +320,7 @@ namespace VirtualJoystick
 
         // A 1 px white outline with rounded corners (anti-aliased), transparent inside and out (filled: white inside).
         // 9-sliced with a style border of the radius, so the corners keep their shape and the straight edges stretch.
-        private static Texture2D RoundedFrame(int radius, bool filled = false)
+        public static Texture2D RoundedFrame(int radius, bool filled = false)
         {
             int n = radius * 2 + 1;
             var t = new Texture2D(n, n, TextureFormat.RGBA32, false) { hideFlags = HideFlags.HideAndDontSave, filterMode = FilterMode.Point, wrapMode = TextureWrapMode.Clamp };

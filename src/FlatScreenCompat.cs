@@ -133,9 +133,9 @@ namespace VirtualJoystick
         private static float _targetFovAtUpdateStart;
 
         // FlatScreen 3's scroll-wheel zoom is ignored when turned off in the settings, in SOI cursor mode (the wheel zooms
-        // the SOI page / TGP there) and over the settings window.
+        // the SOI page / TGP there), while the weapon wheel is open and over the settings window.
         private static bool BlockScrollZoom => VirtualJoystickSettings.Current.disableFlatScreenScrollZoom
-            || VirtualJoystickBehaviour.SoiMode || SettingsWindow.CursorOverWindow;
+            || VirtualJoystickBehaviour.SoiMode || Cockpit.WeaponWheel.Open || SettingsWindow.CursorOverWindow;
 
         public static bool FovAvailable => TargetFov != null && FsInstance() != null;
 

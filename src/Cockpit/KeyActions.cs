@@ -51,9 +51,10 @@ namespace VirtualJoystick.Cockpit
 
             public bool TriggerHeld => _trigger;
 
-            // triggerRamp: seconds for the trigger axis to go from 0 to full while held (0 = at once).
+            // triggerRamp: seconds for the trigger axis to go from 0 to full while held (0 = at once). menuHeld: the menu
+            // button's state when something else reads its key (the weapon wheel), instead of the key itself.
             public void Update(string triggerKey, string menuKey, string secondKey, string thumbL, string thumbR, string thumbD, string thumbU, string pressKey,
-                               float triggerRamp = 0f)
+                               float triggerRamp = 0f, bool? menuHeld = null)
             {
                 if (!Present)
                     return;
@@ -64,7 +65,7 @@ namespace VirtualJoystick.Cockpit
                     _triggerAxis = triggerRamp <= 0f ? 1f : Mathf.Min(1f, _triggerAxis + (wasHeld ? Time.deltaTime / triggerRamp : 0f));
                     Invoke(Stick != null ? Stick.OnTriggerAxis : Throttle.OnTriggerAxis, _triggerAxis);
                 }
-                Edge(ref _menu, Held(menuKey),
+                Edge(ref _menu, menuHeld ?? Held(menuKey),
                     () => (Stick != null ? Stick.OnMenuButtonDown : Throttle.OnMenuButtonDown)?.Invoke(),
                     () => (Stick != null ? Stick.OnMenuButtonUp : Throttle.OnMenuButtonUp)?.Invoke());
                 if (Stick != null)
@@ -401,7 +402,8 @@ namespace VirtualJoystick.Cockpit
                 return;
             }
 
-            Right.Update(S.triggerKey, S.weaponCycleKey, S.stickBKey, S.thumbLeftKey, S.thumbRightKey, S.thumbDownKey, S.thumbUpKey, S.thumbPressKey);
+            Right.Update(S.triggerKey, S.weaponCycleKey, S.stickBKey, S.thumbLeftKey, S.thumbRightKey, S.thumbDownKey, S.thumbUpKey, S.thumbPressKey,
+                         menuHeld: WeaponWheel.MenuHeld(S.weaponCycleKey, _wm, Arming));
             Left.Update(S.throttleTriggerKey, S.throttleMenuKey, S.leftSecondKey, S.throttleThumbLeftKey, S.throttleThumbRightKey,
                         S.throttleThumbDownKey, S.throttleThumbUpKey, S.throttleThumbPressKey, S.throttleTriggerRamp);
             if (Left.Throttle != null)
@@ -559,6 +561,7 @@ namespace VirtualJoystick.Cockpit
             Right.ReleaseAll();
             Left.ReleaseAll();
             SoiKeys.ReleaseAll();
+            WeaponWheel.Reset();
         }
 
         // ------------------------------------------------------------------ discovery

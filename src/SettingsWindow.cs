@@ -168,8 +168,13 @@ namespace VirtualJoystick
             s.openWindowOnStart = Toggle("Open this window when the game starts", s.openWindowOnStart);
             s.enableOnSpawn = Toggle("Enable stick control when entering cockpit", s.enableOnSpawn);
             s.middleHoldRecentersView = Toggle("Hold middle mouse to recentre", s.middleHoldRecentersView);
-            s.middleHoldSeconds = Slider("Hold time", s.middleHoldSeconds, 0.2f, 2f, "0.0' s'");
+            s.middleHoldSeconds = Slider("Hold time", s.middleHoldSeconds, 0.2f, 2f, "0.0' s'", enabled: s.middleHoldRecentersView);
             s.disableFlatScreenScrollZoom = Toggle("Disable FlatScreen 3 scroll wheel FOV zoom", s.disableFlatScreenScrollZoom);
+            EndPanel();
+
+            BeginPanel("Weapon wheel");
+            s.weaponWheel = Toggle("Hold \"Cycle weapons\" to open Weapon Manager", s.weaponWheel);
+            s.weaponWheelHoldSeconds = Slider("Hold time", s.weaponWheelHoldSeconds, 0f, 1f, "0.0' s'", enabled: s.weaponWheel);
             EndPanel();
 
             BeginPanel("SOI cursor");

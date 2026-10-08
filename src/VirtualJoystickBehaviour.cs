@@ -21,8 +21,9 @@ namespace VirtualJoystick
         public static bool IsActive { get; private set; }
         // Virtual joystick on, but Left Alt held: cursor is free for cockpit clicks, keyboard still flies.
         public static bool ClickMode { get; private set; }
-        // FlatScreen 3 hover/click is suppressed while the mouse is flying the aircraft or driving an SOI page.
-        public static bool SuppressCockpitHover => (IsActive && !ClickMode) || SoiMode;
+        // FlatScreen 3 hover/click is suppressed while the mouse is flying the aircraft or driving an SOI page, and while
+        // the weapon wheel is open (the mouse wheel is its own then, not a knob's).
+        public static bool SuppressCockpitHover => (IsActive && !ClickMode) || SoiMode || Cockpit.WeaponWheel.Open;
         // Clickable mode plus FlatScreen 3 free look (RMB held, not pressing a rotary knob): the cockpit is pointed at
         // from the centre of the screen, where a cursor is drawn, so LMB / wheel work on whatever the view is aimed at.
         public static bool CenterCursor => ClickMode && Input.GetMouseButton(1) && !FlatScreenCompat.RmbOnControl;
@@ -613,11 +614,11 @@ namespace VirtualJoystick
             return allowed && (_soiToggled ^ IsHeld(_soiHoldKey));
         }
 
-        // SOI mode: the wheel presses the page's own zoom / range buttons; a short middle press is the page's re-centre
-        // (TGP FWD, map reset, TSD centre, radar unlock, ARAD deselect).
+        // SOI mode: the wheel presses the page's own zoom / range buttons (not while the weapon wheel is open); a short
+        // middle press is the page's re-centre (TGP FWD, map reset, TSD centre, radar unlock, ARAD deselect).
         private void UpdateSoiWheelAndMiddle()
         {
-            float scroll = Input.mouseScrollDelta.y;
+            float scroll = Cockpit.WeaponWheel.Open ? 0f : Input.mouseScrollDelta.y;
             if (scroll > 0f) _soi.Zoom(+1);
             else if (scroll < 0f) _soi.Zoom(-1);
             if (_middleShortPress)
@@ -1109,6 +1110,9 @@ namespace VirtualJoystick
             if (S.showScreenTooltip && ScreenPointer.HoverInfo != null)
                 DrawTooltip(ScreenPointer.HoverInfo);
 
+            if (Cockpit.WeaponWheel.Open)
+                DrawWeaponWheel();
+
             if (_toast != null && Time.unscaledTime < _toastUntil)
             {
                 // Same style as the overlay title, on the line above it; fades out over its last 0.4 s.
@@ -1498,16 +1502,172 @@ namespace VirtualJoystick
         }
 
         // Like the HUD / HMCS text: HUD green, no box, through the HMCS's own additive shader (it brightens what's
-        // behind it rather than covering it). Alpha fades it.
-        private void DrawLabel(Rect line, string text, float alpha)
+        // behind it rather than covering it). Alpha fades it. pivot: 0 = left-aligned in the line, 0.5 = centred,
+        // 1 = right-aligned.
+        private void DrawLabel(Rect line, string text, float alpha, float pivot = 0.5f)
         {
             Color c = Theme.HudGreen;
             c.a = Theme.OverlayTextOpacity * alpha;
-            if (DrawHmcsText(line, text, c))
+            if (DrawHmcsText(line, text, c, pivot))
                 return;
             // HMCS shader not found: plain alpha-blended text in the same colour.
             _labelStyle.normal.textColor = c;
+            _labelStyle.alignment = pivot < 0.25f ? TextAnchor.MiddleLeft : pivot > 0.75f ? TextAnchor.MiddleRight : TextAnchor.MiddleCenter;
             GUI.Label(line, text, _labelStyle);
+            _labelStyle.alignment = TextAnchor.MiddleCenter;
+        }
+
+        // Width of a label's text (glyph advances), and the capital height, in the overlay label font.
+        private float LabelWidth(string text)
+        {
+            Font font = _labelStyle.font != null ? _labelStyle.font : GUI.skin.font;
+            font.RequestCharactersInTexture(text, _labelStyle.fontSize, _labelStyle.fontStyle);
+            float width = 0f;
+            foreach (char ch in text)
+                if (font.GetCharacterInfo(ch, out CharacterInfo ci, _labelStyle.fontSize, _labelStyle.fontStyle))
+                    width += ci.advance;
+            return width;
+        }
+
+        private float LabelCapHeight()
+        {
+            Font font = _labelStyle.font != null ? _labelStyle.font : GUI.skin.font;
+            font.RequestCharactersInTexture("H", _labelStyle.fontSize, _labelStyle.fontStyle);
+            return font.GetCharacterInfo('H', out CharacterInfo cap, _labelStyle.fontSize, _labelStyle.fontStyle) ? cap.maxY : _labelStyle.fontSize * 0.7f;
+        }
+
+        // Weapon wheel: a column right of the control area, centred on it vertically, in the overlay title's text. One
+        // row per weapon, name on the left and count on the right, with the bindings keycaps' padding (KeycapPad of
+        // clear space round the capitals, plus the frame's pixel); the selected weapon framed like a keycap. Empty
+        // weapons are crossed out like an empty keycap, corner to corner (still selectable). Frame and cross are drawn
+        // like the text: label colour and opacity, through the HMCS's additive shader.
+        private const float WheelPad = 6f;       // keycap padding + frame
+        private const float WheelColumnGap = 24f;
+        private const float WheelRowGap = 2f;
+        private const float WheelOffset = 16f;   // from the control area's right edge
+        private const int WheelFrameRadius = Theme.KeycapRadius;
+        private Texture2D _wheelFrame, _wheelCross;
+
+        private void DrawWeaponWheel()
+        {
+            var items = Cockpit.WeaponWheel.Items;
+            float nameW = 0f, countW = 0f;
+            foreach (var it in items)
+            {
+                nameW = Mathf.Max(nameW, LabelWidth(it.Name));
+                countW = Mathf.Max(countW, LabelWidth(it.Count.ToString()));
+            }
+            float capH = LabelCapHeight();
+            float rowH = Mathf.Round(capH) + WheelPad * 2f;
+            float rowW = Mathf.Round(nameW + WheelColumnGap + countW) + WheelPad * 2f;
+            int n = Mathf.Max(items.Count, 1);
+            float x = Mathf.Round(Screen.width * 0.5f + S.overlaySize * 0.5f + WheelOffset);
+            float y = Mathf.Round(Screen.height * 0.5f - (n * rowH + (n - 1) * WheelRowGap) * 0.5f);
+
+            if (items.Count == 0)
+            {
+                DrawLabel(new Rect(x, y, 300f, rowH), "NO WEAPONS", 1f, 0f);
+                return;
+            }
+            if (_wheelFrame == null)
+                _wheelFrame = Theme.RoundedFrame(WheelFrameRadius);
+            if (_wheelCross == null || _wheelCross.width != (int)rowW || _wheelCross.height != (int)rowH)
+            {
+                if (_wheelCross != null)
+                    Destroy(_wheelCross);
+                _wheelCross = CrossTexture((int)rowW, (int)rowH);
+            }
+            Color c = Theme.HudGreen;
+            c.a = Theme.OverlayTextOpacity;
+            foreach (var it in items)
+            {
+                var row = new Rect(x, y, rowW, rowH);
+                var text = new Rect(row.x + WheelPad, row.y, row.width - WheelPad * 2f, row.height);
+                if (it.Current)
+                    DrawShape(row, _wheelFrame, c, WheelFrameRadius);
+                if (it.Count <= 0)
+                    DrawShape(row, _wheelCross, c, 0);
+                DrawLabel(text, it.Name, 1f, 0f);
+                DrawLabel(text, it.Count.ToString(), 1f, 1f);
+                y += rowH + WheelRowGap;
+            }
+        }
+
+        // An empty keycap's cross at w x h: 1 px anti-aliased diagonals right into the corners (the corner pixels'
+        // centres), drawn 1:1. White, tinted when drawn.
+        private static Texture2D CrossTexture(int w, int h)
+        {
+            var t = new Texture2D(w, h, TextureFormat.RGBA32, false)
+                { hideFlags = HideFlags.HideAndDontSave, filterMode = FilterMode.Point, wrapMode = TextureWrapMode.Clamp };
+            Vector2 a0 = new Vector2(0.5f, 0.5f), a1 = new Vector2(w - 0.5f, h - 0.5f);
+            Vector2 b0 = new Vector2(0.5f, h - 0.5f), b1 = new Vector2(w - 0.5f, 0.5f);
+            for (int y = 0; y < h; y++)
+                for (int x = 0; x < w; x++)
+                {
+                    var p = new Vector2(x + 0.5f, y + 0.5f);
+                    float d = Mathf.Min(SegmentDistance(p, a0, a1), SegmentDistance(p, b0, b1));
+                    t.SetPixel(x, y, new Color(1f, 1f, 1f, Mathf.Clamp01(1f - d)));
+                }
+            t.Apply();
+            return t;
+        }
+
+        private static float SegmentDistance(Vector2 p, Vector2 a, Vector2 b)
+        {
+            Vector2 ab = b - a;
+            float t = Mathf.Clamp01(Vector2.Dot(p - a, ab) / ab.sqrMagnitude);
+            return Vector2.Distance(p, a + ab * t);
+        }
+
+        private GUIStyle _shapeStyle;
+
+        // A white shape texture drawn like the overlay text: HMCS additive shader, in color. border > 0: 9-sliced, the
+        // corners kept at their size. Without the shader: alpha-blended in the same colour.
+        private void DrawShape(Rect r, Texture2D tex, Color color, int border)
+        {
+            Material mat = HmcsTextMaterial;
+            if (mat == null)
+            {
+                if (_shapeStyle == null)
+                    _shapeStyle = new GUIStyle();
+                _shapeStyle.normal.background = tex;
+                _shapeStyle.border = new RectOffset(border, border, border, border);
+                GUI.color = color;
+                _shapeStyle.Draw(r, false, false, false, false);
+                GUI.color = Color.white;
+                return;
+            }
+            mat.mainTexture = tex;
+            mat.SetVector("_ClipRect", new Vector4(-1e6f, -1e6f, 1e6f, 1e6f));
+            mat.SetFloat("_HUDBrightness", 1f);
+            // The shader adds white to what it samples (for the alpha-only font atlas); the shapes are white already,
+            // so nothing is added, and they come out in exactly the vertex colour, as the text does. Put back after.
+            mat.SetVector("_TextureSampleAdd", Vector4.zero);
+
+            // Columns / rows of the 9-slice in GUI pixels and texture UVs (one slice when border is 0).
+            float bu = border / (float)tex.width, bv = border / (float)tex.height;
+            float[] xs = border > 0 ? new[] { r.xMin, r.xMin + border, r.xMax - border, r.xMax } : new[] { r.xMin, r.xMax };
+            float[] us = border > 0 ? new[] { 0f, bu, 1f - bu, 1f } : new[] { 0f, 1f };
+            float[] ys = border > 0 ? new[] { r.yMin, r.yMin + border, r.yMax - border, r.yMax } : new[] { r.yMin, r.yMax };
+            float[] vs = border > 0 ? new[] { 1f, 1f - bv, bv, 0f } : new[] { 1f, 0f }; // GUI top = texture top
+            float h = Screen.height;
+            GL.PushMatrix();
+            GL.LoadPixelMatrix();
+            mat.SetPass(0);
+            GL.Begin(GL.QUADS);
+            GL.Color(color);
+            for (int j = 0; j < ys.Length - 1; j++)
+                for (int i = 0; i < xs.Length - 1; i++)
+                {
+                    float top = h - ys[j], bottom = h - ys[j + 1];
+                    GL.TexCoord2(us[i], vs[j]); GL.Vertex3(xs[i], top, 0f);
+                    GL.TexCoord2(us[i + 1], vs[j]); GL.Vertex3(xs[i + 1], top, 0f);
+                    GL.TexCoord2(us[i + 1], vs[j + 1]); GL.Vertex3(xs[i + 1], bottom, 0f);
+                    GL.TexCoord2(us[i], vs[j + 1]); GL.Vertex3(xs[i], bottom, 0f);
+                }
+            GL.End();
+            GL.PopMatrix();
+            mat.SetVector("_TextureSampleAdd", new Vector4(1f, 1f, 1f, 0f));
         }
 
         private static Material _hmcsTextMaterial;
@@ -1537,9 +1697,9 @@ namespace VirtualJoystick
             }
         }
 
-        // Glyph quads in immediate mode, straight onto the screen, centred in the line. False if the shader isn't
-        // available.
-        private bool DrawHmcsText(Rect line, string text, Color color)
+        // Glyph quads in immediate mode, straight onto the screen, placed in the line by pivot (0 left, 0.5 centred,
+        // 1 right). False if the shader isn't available.
+        private bool DrawHmcsText(Rect line, string text, Color color, float pivot = 0.5f)
         {
             Material mat = HmcsTextMaterial;
             if (mat == null)
@@ -1557,7 +1717,7 @@ namespace VirtualJoystick
                 if (font.GetCharacterInfo(ch, out CharacterInfo ci, size, style))
                     width += ci.advance;
             font.GetCharacterInfo('H', out CharacterInfo cap, size, style);
-            float pen = Mathf.Round(line.center.x - width * 0.5f);
+            float pen = Mathf.Round(line.x + (line.width - width) * pivot);
             float baseline = Mathf.Round(line.center.y + cap.maxY * 0.5f);
 
             mat.mainTexture = font.material.mainTexture;

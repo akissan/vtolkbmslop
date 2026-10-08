@@ -217,6 +217,11 @@ namespace VirtualJoystick
         // Ignore FlatScreen 3's scroll-wheel zoom (camera FOV) entirely; the FOV keys still work. It is always ignored in
         // SOI cursor mode, where the wheel zooms the SOI page.
         public bool disableFlatScreenScrollZoom = true;
+        // Weapon wheel: holding the weapon cycle key for weaponWheelHoldSeconds lists the weapons beside the stick overlay
+        // and the mouse wheel selects one; a short press still cycles (sent on release). 0 to 1 s; 0 opens it on the
+        // press, and the key no longer cycles.
+        public bool weaponWheel = true;
+        public float weaponWheelHoldSeconds = 0.4f;
         // Re-centre the virtual stick every time the mode is switched on.
         public bool recenterOnEnable = true;
 
