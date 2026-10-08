@@ -383,7 +383,9 @@ namespace VirtualJoystick
             float inv = S.invertPitch ? -1f : 1f;
             Vector2 kbTarget = new Vector2(KeyAxis(_rollRight, _rollLeft), KeyAxis(_pitchDown, _pitchUp) * inv);
             // Per axis (x = roll, A/D; y = pitch, W/S): a held key ramps at that axis' speed; with no key, the axis drifts
-            // back to centre at its own return rate.
+            // back to centre at its own return rate, or stays put if that axis' return is off.
+            if (kbTarget.x == 0f && !S.keyboardReturnRoll) kbTarget.x = _keyboard.x;
+            if (kbTarget.y == 0f && !S.keyboardReturnPitch) kbTarget.y = _keyboard.y;
             _keyboard.x = Mathf.MoveTowards(_keyboard.x, kbTarget.x, (kbTarget.x != 0f ? S.keyboardRateRoll : S.keyboardReturnRateRoll) * dt);
             _keyboard.y = Mathf.MoveTowards(_keyboard.y, kbTarget.y, (kbTarget.y != 0f ? S.keyboardRatePitch : S.keyboardReturnRatePitch) * dt);
         }

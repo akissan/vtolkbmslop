@@ -54,12 +54,12 @@ A short, fixed set of keyboard bindings that apply to every aircraft:
 - **STICK (right controller)**: stick movement (W/S/A/D, Q/E), trigger, A (menu / weapon cycle),
   B (second button), thumbstick left/right/up/down/press.
 - **THROTTLE (left controller)**: throttle up/down (Left Shift / Left Ctrl, speed slider), full
-  throttle, MIL power (just below the afterburner detent), zero throttle, trigger,
+  throttle, MIL power (just below the afterburner detent), zero throttle, trigger (`B`, with a 0–0.8 s ramp-up, default 0.2 s),
   menu button, thumbstick left/right/up/down/press.
 - **ENGINE**: engine 1 (left / only), engine 2 (right), APU, main battery (on/off/toggle each). Switches
   under a cover get the cover lifted first.
 - **AIRCRAFT**: canopy (open/close/toggle), parking brake / brake lock (on/off/toggle; toggle on `H`),
-  wheel brakes (hold, `B`), flaps (down/up one step, cycle), landing gear
+  wheel brakes (hold), airbrake / speed brake (hold, toggle), flaps (down/up one step, cycle), landing gear
   (up/down/toggle), wing sweep, launch bar and arrestor hook (extend/retract/toggle).
 - **COMBAT**: countermeasures (hold, `X`; no helicopter combo needed), radar power (on/off/toggle), RWR (on/mute/off/cycle), master arm (on/off/toggle; on
   lifts the switch cover), arming mode AA / AG / toggle (EF-24, the only aircraft with one), TGP zoom
@@ -108,6 +108,7 @@ The defaults are the field initializers in `src/VirtualJoystickSettings.cs` (sli
 | `pitchDownKey` / `pitchUpKey` / `rollLeftKey` / `rollRightKey` | `W` / `S` / `A` / `D` | Keyboard stick, added on top of the mouse. Also flies with the virtual joystick off (only while a key is held or springing back, so a real joystick still works otherwise) |
 | `keyboardRatePitch` / `keyboardRateRoll` | `3` / `3` | How fast W/S (pitch) and A/D (roll) ramp in while held (per second) |
 | `keyboardReturnRatePitch` / `keyboardReturnRateRoll` | `4.8` / `4.8` | How fast W/S (pitch) and A/D (roll) input return to centre after release (per second) |
+| `keyboardReturnPitch` / `keyboardReturnRoll` | `true` / `true` | Off: that axis stays where the keys left it instead of returning to centre |
 | `menuKey` | `"F8"` | Opens the settings window |
 | `middleMouseRecenters` | `true` | |
 | `middleHoldRecentersView` | `true` | Holding middle mouse for `middleHoldSeconds` re-centres the view (FlatScreen 3's camera reset, or the game's VR re-centre without it) |

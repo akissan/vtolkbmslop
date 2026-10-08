@@ -19,6 +19,7 @@ namespace VirtualJoystick
             public static readonly Color Text = Hex(0x74F27E, 1f);   // bright green: text, lines, fills
             public static readonly Color Hover = Color.white;        // hovered / pressed elements
             public static readonly Color Clash = Hex(0xFFE14D, 1f);  // bright yellow: keys also bound elsewhere, and their cards
+            public static readonly Color Disabled = Hex(0x969696, 1f); // neutral grey, a little darker than Text: settings switched off
         }
 
         // The green of the aircraft HUD and helmet symbology (the game's most used UI green): the overlay title and
@@ -35,8 +36,8 @@ namespace VirtualJoystick
         public const string HmcsShaderName = "UI/DefaultOverlay2";
         public const float OverlayTextOpacity = 0.85f;
 
-        // 13 rather than 14: the monospaced HUD font runs wider than the default one.
-        public const int FontSize = 13;
+        // 12 rather than 14: the monospaced HUD font runs wider than the default one.
+        public const int FontSize = 12;
 
         // The font of the game's HUD and helmet display text. It's loaded with the game's shared assets, so it may not
         // exist yet at startup: looked up again every couple of seconds until found (null until then).
@@ -73,8 +74,12 @@ namespace VirtualJoystick
 
         private static GUISkin _skin;
         public static GUIStyle Window, Label, Bold, Small, Hint, SectionTitle, Button, CardHeader, CardHeaderOpen, CardBody,
-            CardOpen, CardHeaderClash, CardHeaderOpenClash, CardOpenClash, KeyButtonClash, Tab, Panel, Slider, SliderThumb, KeyButton, KeyButtonCapture, Flush, LabelWrap, WarningText, Footer, SliderValue;
+            CardOpen, CardHeaderClash, CardHeaderOpenClash, CardOpenClash, KeyButtonClash, Tab, Panel, Slider, SliderThumb, SliderDisabled, SliderThumbDisabled, LabelDisabled, SliderValueDisabled, KeyButton, Keycap, KeycapFill, KeyText, KeyButtonCapped, KeyButtonClashCapped, Flush, LabelWrap, WarningText, Footer, SliderValue;
         public static Texture2D CheckOff, CheckOffHover, CheckOn, CheckOnHover;
+        public static Texture2D BigCheckOff, BigCheckOffHover, BigCheckOn, BigCheckOnHover;
+
+        // Side of the larger checkboxes in binding cards, which sit in the key / slider column.
+        public const int BigCheckSize = 15;
 
         // Checkbox side: the height of a capital letter of Label.
         public static int CheckSize;
@@ -132,9 +137,9 @@ namespace VirtualJoystick
             Bold = new GUIStyle(Label) { fontStyle = heavy };
             Small = new GUIStyle(Label) { fontSize = FontSize - 2, wordWrap = true };
             Small.normal.textColor = Menu.Text;
-            // The hint line at the bottom of the window: as far from the buttons above as from the window's left and
-            // bottom edges (which add the window's own Gap).
-            Footer = new GUIStyle(Small) { padding = new RectOffset(Gap * 2, Gap * 2, Gap * 3, Gap * 2) };
+            // The key capture hint, between the content and the bottom buttons: the usual text size, lined up with the
+            // content's text, as far above the buttons as the content is.
+            Footer = new GUIStyle(Label) { wordWrap = true, padding = new RectOffset(Label.padding.left, Label.padding.right, 0, Gap * 2) };
             SliderValue = new GUIStyle(Label) { alignment = TextAnchor.UpperRight };
             Hint = new GUIStyle(Label) { fontSize = FontSize - 3, wordWrap = true, padding = new RectOffset(9, 7, 1, 5) };
             Hint.normal.textColor = Menu.Text;
@@ -156,19 +161,25 @@ namespace VirtualJoystick
             Button.active.background = buttonFrameHover;
             Button.active.textColor = Menu.Hover;
 
-            // Key binding buttons: just text, framed only on hover; yellow text when the key is also bound elsewhere
-            // (KeyButtonClash); while waiting for a key, filled (KeyButtonCapture).
+            // Key binding buttons: they size the row, and their text colours (green, yellow when the key is also bound
+            // elsewhere: KeyButtonClash, white on hover) colour the keycap drawn in them.
             KeyButton = new GUIStyle(Button) { margin = new RectOffset(Gap + 1, 0, Gap, Gap) };
             KeyButton.normal.background = null;
             KeyButtonClash = new GUIStyle(KeyButton);
             KeyButtonClash.normal.textColor = Menu.Clash;
-            KeyButtonCapture = new GUIStyle(KeyButton);
-            KeyButtonCapture.normal.background = fill;
-            KeyButtonCapture.normal.textColor = Menu.Main;
-            KeyButtonCapture.hover.background = fillHover;
-            KeyButtonCapture.hover.textColor = Menu.Main;
-            KeyButtonCapture.active.background = fillHover;
-            KeyButtonCapture.active.textColor = Menu.Main;
+
+            // A bound key: the button draws no text (the ...Capped styles) and the name is drawn by hand in a keycap,
+            // a rounded frame (Keycap: white, tinted when drawn, transparent inside), with the text (KeyText: white,
+            // tinted, no padding) centred in it, so text and frame come from the same rectangle.
+            Keycap = new GUIStyle { border = new RectOffset(KeycapRadius, KeycapRadius, KeycapRadius, KeycapRadius) };
+            Keycap.normal.background = RoundedFrame(KeycapRadius);
+            // Hovered: the cap filled white, the text in the background colour.
+            KeycapFill = new GUIStyle(Keycap);
+            KeycapFill.normal.background = RoundedFrame(KeycapRadius, true);
+            KeyText = new GUIStyle { font = font, fontSize = FontSize, alignment = TextAnchor.UpperLeft, clipping = TextClipping.Overflow, wordWrap = false };
+            KeyText.normal.textColor = Color.white;
+            KeyButtonCapped = NoText(KeyButton);
+            KeyButtonClashCapped = NoText(KeyButtonClash);
 
             // Cards: a header button framed by a 1 px border (white on hover). When open, the frame moves out to hold
             // header and body together (CardOpen) and the header itself is unframed. A card with a clashing key has a
@@ -228,6 +239,16 @@ namespace VirtualJoystick
             SliderThumb.normal.background = fill;
             SliderThumb.hover.background = fillHover;
             SliderThumb.active.background = fillHover;
+            // A slider whose setting is switched off: all grey, no hover.
+            Texture2D fillDisabled = Solid(Menu.Disabled);
+            SliderDisabled = new GUIStyle(Slider);
+            SliderDisabled.normal.background = HorizontalLine(SliderHeight, Menu.Disabled);
+            SliderThumbDisabled = new GUIStyle(SliderThumb);
+            SliderThumbDisabled.normal.background = SliderThumbDisabled.hover.background = SliderThumbDisabled.active.background = fillDisabled;
+            LabelDisabled = new GUIStyle(Label);
+            LabelDisabled.normal.textColor = Menu.Disabled;
+            SliderValueDisabled = new GUIStyle(SliderValue);
+            SliderValueDisabled.normal.textColor = Menu.Disabled;
 
             // Checkboxes as tall as a capital letter: a 1 px border, filled when on (drawn 1:1 so the border stays 1 px).
             MeasureText(font, FontSize);
@@ -235,6 +256,10 @@ namespace VirtualJoystick
             CheckOffHover = Checkbox(Menu.Main, Menu.Hover);
             CheckOn = Checkbox(Menu.Text, Menu.Text);
             CheckOnHover = Checkbox(Menu.Hover, Menu.Hover);
+            BigCheckOff = Checkbox(Menu.Main, Menu.Text, BigCheckSize);
+            BigCheckOffHover = Checkbox(Menu.Main, Menu.Hover, BigCheckSize);
+            BigCheckOn = Checkbox(Menu.Text, Menu.Text, BigCheckSize);
+            BigCheckOnHover = Checkbox(Menu.Hover, Menu.Hover, BigCheckSize);
 
             _skin.window = Window;
             _skin.label = Label;
@@ -275,6 +300,40 @@ namespace VirtualJoystick
             for (int y = 0; y < n; y++)
                 for (int x = 0; x < n; x++)
                     t.SetPixel(x, y, x == width && y == width ? Menu.Main : c);
+            t.Apply();
+            return t;
+        }
+
+        // A copy of the style that draws nothing: no text (it still sizes the button) and no hover frame, the keycap
+        // showing the hover instead.
+        private static GUIStyle NoText(GUIStyle s)
+        {
+            var c = new GUIStyle(s);
+            Color clear = new Color(0f, 0f, 0f, 0f);
+            c.normal.textColor = c.hover.textColor = c.active.textColor = c.focused.textColor = clear;
+            c.normal.background = c.hover.background = c.active.background = c.focused.background = null;
+            return c;
+        }
+
+        // Corner radius of the keycap frame.
+        public const int KeycapRadius = 6;
+
+        // A 1 px white outline with rounded corners (anti-aliased), transparent inside and out (filled: white inside).
+        // 9-sliced with a style border of the radius, so the corners keep their shape and the straight edges stretch.
+        private static Texture2D RoundedFrame(int radius, bool filled = false)
+        {
+            int n = radius * 2 + 1;
+            var t = new Texture2D(n, n, TextureFormat.RGBA32, false) { hideFlags = HideFlags.HideAndDontSave, filterMode = FilterMode.Point, wrapMode = TextureWrapMode.Clamp };
+            // Pixel centres measured from the middle pixel: the edge pixels (the stretched straight edges) are `radius`
+            // away, so the outline is drawn there, fading over a pixel either side for smooth corners.
+            for (int y = 0; y < n; y++)
+                for (int x = 0; x < n; x++)
+                {
+                    float dx = x - radius, dy = y - radius;
+                    float d = Mathf.Sqrt(dx * dx + dy * dy);
+                    float a = filled ? Mathf.Clamp01(radius + 1f - d) : Mathf.Clamp01(1f - Mathf.Abs(d - radius));
+                    t.SetPixel(x, y, new Color(1f, 1f, 1f, a));
+                }
             t.Apply();
             return t;
         }
@@ -323,9 +382,9 @@ namespace VirtualJoystick
         }
 
         // Square with a 1 px border, drawn 1:1 so the border stays thin.
-        private static Texture2D Checkbox(Color fill, Color border)
+        private static Texture2D Checkbox(Color fill, Color border, int size = 0)
         {
-            int n = CheckSize;
+            int n = size > 0 ? size : CheckSize;
             var t = new Texture2D(n, n, TextureFormat.RGBA32, false) { hideFlags = HideFlags.HideAndDontSave, filterMode = FilterMode.Point, wrapMode = TextureWrapMode.Clamp };
             for (int y = 0; y < n; y++)
                 for (int x = 0; x < n; x++)

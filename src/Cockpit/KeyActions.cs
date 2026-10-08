@@ -47,16 +47,23 @@ namespace VirtualJoystick.Cockpit
 
             // Edge state.
             private bool _trigger, _menu, _second, _press, _thumbActive;
+            private float _triggerAxis;   // 0..1, ramps up while the trigger key is held
 
             public bool TriggerHeld => _trigger;
 
-            public void Update(string triggerKey, string menuKey, string secondKey, string thumbL, string thumbR, string thumbD, string thumbU, string pressKey)
+            // triggerRamp: seconds for the trigger axis to go from 0 to full while held (0 = at once).
+            public void Update(string triggerKey, string menuKey, string secondKey, string thumbL, string thumbR, string thumbD, string thumbU, string pressKey,
+                               float triggerRamp = 0f)
             {
                 if (!Present)
                     return;
+                bool wasHeld = _trigger;
                 Edge(ref _trigger, Held(triggerKey), TriggerDown, TriggerUp);
                 if (_trigger)
-                    Invoke(Stick != null ? Stick.OnTriggerAxis : Throttle.OnTriggerAxis, 1f);
+                {
+                    _triggerAxis = triggerRamp <= 0f ? 1f : Mathf.Min(1f, _triggerAxis + (wasHeld ? Time.deltaTime / triggerRamp : 0f));
+                    Invoke(Stick != null ? Stick.OnTriggerAxis : Throttle.OnTriggerAxis, _triggerAxis);
+                }
                 Edge(ref _menu, Held(menuKey),
                     () => (Stick != null ? Stick.OnMenuButtonDown : Throttle.OnMenuButtonDown)?.Invoke(),
                     () => (Stick != null ? Stick.OnMenuButtonUp : Throttle.OnMenuButtonUp)?.Invoke());
@@ -95,14 +102,16 @@ namespace VirtualJoystick.Cockpit
                 _trigger = _menu = _second = _press = _thumbActive = false;
             }
 
+            // The click fires on press; the axis follows from Update (ramped).
             private void TriggerDown()
             {
+                _triggerAxis = 0f;
                 (Stick != null ? Stick.OnTriggerDown : Throttle.OnTriggerDown)?.Invoke();
-                Invoke(Stick != null ? Stick.OnTriggerAxis : Throttle.OnTriggerAxis, 1f);
             }
 
             private void TriggerUp()
             {
+                _triggerAxis = 0f;
                 Invoke(Stick != null ? Stick.OnTriggerAxis : Throttle.OnTriggerAxis, 0f);
                 (Stick != null ? Stick.OnTriggerUp : Throttle.OnTriggerUp)?.Invoke();
             }
@@ -246,6 +255,13 @@ namespace VirtualJoystick.Cockpit
         private static CountermeasureManager _cmm;
         private static VTOLVR.Multiplayer.MultiUserVehicleSync _muvs;
         private static bool _wheelBrakeHeld, _cmHeld;
+        private static float _wheelBrake;               // 0..1, ramps up while the key is held
+        private const float WheelBrakeRampTime = 0.4f;  // seconds from 0 to full brakes
+
+        // Airbrake: the throttle trigger axis, which each aircraft wires to its airbrake (and the multicrew sync).
+        // Only the axis is driven, not trigger down/up, so a trigger that's also a modifier isn't pressed.
+        private static bool _airbrakeToggled, _airbrakeApplied;
+        public static bool HasAirbrake { get; private set; }
         public static bool HasWheels => _wheels.Length > 0;
         public static bool HasCountermeasures => _cmm != null;
 
@@ -280,6 +296,8 @@ namespace VirtualJoystick.Cockpit
             _wheels = new WheelsController[0];
             _cmm = null;
             _muvs = null;
+            HasAirbrake = false;
+            _airbrakeToggled = _airbrakeApplied = false;
             _thrTarget = null;
             _thrDriving = false;
             Sweep = null;
@@ -313,7 +331,7 @@ namespace VirtualJoystick.Cockpit
 
             Right.Update(S.triggerKey, S.weaponCycleKey, S.stickBKey, S.thumbLeftKey, S.thumbRightKey, S.thumbDownKey, S.thumbUpKey, S.thumbPressKey);
             Left.Update(S.throttleTriggerKey, S.throttleMenuKey, S.leftSecondKey, S.throttleThumbLeftKey, S.throttleThumbRightKey,
-                        S.throttleThumbDownKey, S.throttleThumbUpKey, S.throttleThumbPressKey);
+                        S.throttleThumbDownKey, S.throttleThumbUpKey, S.throttleThumbPressKey, S.throttleTriggerRamp);
             if (Left.Throttle != null)
                 UpdateThrottleLever(Left.Throttle, Time.deltaTime);
             SoiKeys.Update();
@@ -326,7 +344,9 @@ namespace VirtualJoystick.Cockpit
             OnOffToggle(Battery, S.batteryOnKey, S.batteryOffKey, S.batteryToggleKey);
             OnOffToggle(Canopy, S.canopyOpenKey, S.canopyCloseKey, S.canopyToggleKey);
             OnOffToggle(ParkingBrake, S.parkingBrakeOnKey, S.parkingBrakeOffKey, S.parkingBrakeToggleKey);
-            SetWheelBrake(Held(S.wheelBrakeKey));
+            SetWheelBrake(Held(S.wheelBrakeKey), Time.deltaTime);
+            if (Pressed(S.airbrakeToggleKey)) _airbrakeToggled = !_airbrakeToggled;
+            SetAirbrake(Held(S.airbrakeHoldKey) || _airbrakeToggled);
             SetCountermeasures(Held(S.countermeasureKey));
             OnOffToggle(MasterArm, S.masterArmOnKey, S.masterArmOffKey, S.masterArmToggleKey);
 
@@ -345,7 +365,8 @@ namespace VirtualJoystick.Cockpit
             if (Pressed(S.flapsDownKey)) Flaps.Step(+1);
             if (Pressed(S.flapsUpKey)) Flaps.Step(-1);
             if (Pressed(S.flapsCycleKey)) Flaps.Cycle();
-            // Gear lever: state 1 = up, 0 = down. Launch bar / hook: 1 = extended. Radar: 1 = on.            if (Pressed(S.gearUpKey)) Gear.Set(1);
+            // Gear lever: state 1 = up, 0 = down. Launch bar / hook: 1 = extended. Radar: 1 = on.
+            if (Pressed(S.gearUpKey)) Gear.Set(1);
             if (Pressed(S.gearDownKey)) Gear.Set(0);
             if (Pressed(S.gearToggleKey)) Gear.Toggle();
             if (Pressed(S.launchBarExtendKey)) LaunchBar.Set(1);
@@ -372,15 +393,27 @@ namespace VirtualJoystick.Cockpit
             }
         }
 
-        // Full wheel brakes while held (re-applied every frame, since the brake trigger writes the same value).
-        private static void SetWheelBrake(bool held)
+        // Wheel brakes while held, ramping from 0 to full over WheelBrakeRampTime; off at once on release
+        // (re-applied every frame, since the brake trigger writes the same value).
+        private static void SetWheelBrake(bool held, float dt)
         {
             if (!held && !_wheelBrakeHeld)
                 return;
             _wheelBrakeHeld = held;
+            _wheelBrake = held ? Mathf.Min(1f, _wheelBrake + dt / WheelBrakeRampTime) : 0f;
             foreach (var w in _wheels)
                 if (w != null)
-                    w.SetBrakes(held ? 1f : 0f);
+                    w.SetBrakes(_wheelBrake);
+        }
+
+        // Full airbrake while on (re-applied every frame, as the trigger does); retracted once when it goes off. The
+        // throttle trigger key, while held, writes full brakes itself.
+        private static void SetAirbrake(bool on)
+        {
+            if (!HasAirbrake || Left.TriggerHeld || (!on && !_airbrakeApplied))
+                return;
+            _airbrakeApplied = on;
+            Left.Throttle.OnTriggerAxis.Invoke(on ? 1f : 0f);
         }
 
         // Countermeasures fire while held, at the selected release rate, as the CMS button does. A multicrew seat that
@@ -440,7 +473,8 @@ namespace VirtualJoystick.Cockpit
 
         private static void ReleaseAll()
         {
-            SetWheelBrake(false);
+            SetWheelBrake(false, 0f);
+            SetAirbrake(false);
             SetCountermeasures(false);
             Right.ReleaseAll();
             Left.ReleaseAll();
@@ -515,6 +549,7 @@ namespace VirtualJoystick.Cockpit
             _wheels = _vehicle.GetComponentsInChildren<WheelsController>(true);
             _cmm = _vehicle.GetComponentInChildren<CountermeasureManager>(true);
             _muvs = _vehicle.GetComponentInChildren<VTOLVR.Multiplayer.MultiUserVehicleSync>(true);
+            HasAirbrake = Left.Throttle != null && EventHints.HasListener(Left.Throttle.OnTriggerAxis, "Brake");
 
             var found = new List<string>();
             foreach (var n in Named)

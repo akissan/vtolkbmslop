@@ -80,6 +80,17 @@ namespace VirtualJoystick.Cockpit
             return parts.Count == 0 ? null : string.Join(" · ", parts);
         }
 
+        // Whether any listener's method name contains the given text.
+        public static bool HasListener(UnityEventBase e, string methodPart)
+        {
+            if (e == null)
+                return false;
+            foreach (var (_, method) in Listeners(e))
+                if (method.IndexOf(methodPart, StringComparison.Ordinal) >= 0)
+                    return true;
+            return false;
+        }
+
         // Every listener: persistent (prefab) via the public API, runtime ones (AddListener) via the call list.
         private static IEnumerable<(string type, string method)> Listeners(UnityEventBase e)
         {

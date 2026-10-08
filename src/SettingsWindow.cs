@@ -80,17 +80,25 @@ namespace VirtualJoystick
             int shown = _tab;
             // The content scroll view always keeps its scrollbar column, so the tab bar and the bottom row leave the
             // same space on the right: everything shares the same left and right edges.
+            // Tabs touch, their 1 px borders overlapping; the hovered one's white frame is drawn again on top so its
+            // neighbour's border can't cover it.
             int tab = _tab;
+            Rect hoveredTab = Rect.zero;
             GUILayout.BeginHorizontal();
             for (int i = 0; i < Tabs.Length; i++)
             {
                 if (i > 0)
-                    GUILayout.Space(TabGap);
+                    GUILayout.Space(-1f);
                 if (GUILayout.Toggle(_tab == i, Tabs[i], Theme.Tab, GUILayout.ExpandWidth(true)) && _tab != i)
                     tab = i;
+                Rect r = GUILayoutUtility.GetLastRect();
+                if (r.Contains(Event.current.mousePosition))
+                    hoveredTab = r;
             }
             GUILayout.Space(Theme.ScrollbarSpace);
             GUILayout.EndHorizontal();
+            if (hoveredTab.width > 0f && Event.current.type == EventType.Repaint)
+                Outline(hoveredTab, Theme.Menu.Hover);
             if (tab != _tab)
             {
                 _tab = tab;
@@ -108,6 +116,8 @@ namespace VirtualJoystick
             GUILayout.EndScrollView();
 
             GUILayout.Space(Theme.Gap * 2);
+            if (_rebinding != null)
+                GUILayout.Label("Press a key to bind. Esc cancels, Delete or Backspace clears.", Theme.Footer);
             GUILayout.BeginHorizontal();
             // The reset button resets what the tab shows: the settings, or (Bindings tab) only the keys.
             if (shown < 2)
@@ -130,8 +140,6 @@ namespace VirtualJoystick
                 Close();
             GUILayout.Space(Theme.ScrollbarSpace);
             GUILayout.EndHorizontal();
-            if (_rebinding != null)
-                GUILayout.Label("Press a key to bind. Esc cancels, Delete or Backspace clears.", Theme.Footer);
 
             GUI.DragWindow();
         }
@@ -144,14 +152,6 @@ namespace VirtualJoystick
             s.enableOnSpawn = Toggle("Enable stick control when entering cockpit", s.enableOnSpawn);
             s.middleHoldRecentersView = Toggle("Hold middle mouse to recentre", s.middleHoldRecentersView);
             s.middleHoldSeconds = Slider("Hold time", s.middleHoldSeconds, 0.2f, 2f, "0.0' s'");
-            EndPanel();
-
-            BeginPanel("Keyboard");
-            s.keyboardRatePitch = Slider("W/S pitch speed", s.keyboardRatePitch, 0.5f, 10f, "0.0'/s'");
-            s.keyboardRateRoll = Slider("A/D roll speed", s.keyboardRateRoll, 0.5f, 10f, "0.0'/s'");
-            s.keyboardReturnRatePitch = Slider("W/S return to centre", s.keyboardReturnRatePitch, 0.5f, 10f, "0.0'/s'");
-            s.keyboardReturnRateRoll = Slider("A/D return to centre", s.keyboardReturnRateRoll, 0.5f, 10f, "0.0'/s'");
-            s.rudderRate = Slider("Rudder (Q/E) speed", s.rudderRate, 0.5f, 10f, "0.0'/s'");
             EndPanel();
 
             BeginPanel("SOI cursor");
@@ -193,9 +193,23 @@ namespace VirtualJoystick
             EndPanel();
         }
 
+        // Extra space between two setting rows (checkbox / slider) in a section: the checkbox's gap to its label
+        // (6 px to the label, plus the label's 4 px padding).
+        private const float PanelRowGap = 10f;
+        private static bool _panelFirstRow;
+
+        // Before each setting row in a section: the row gap, except above the first.
+        private static void PanelRowSpace()
+        {
+            if (!_panelFirstRow)
+                GUILayout.Space(PanelRowGap);
+            _panelFirstRow = false;
+        }
+
         // A section: corner marks, no background; optional title.
         private static void BeginPanel(string title)
         {
+            _panelFirstRow = true;
             GUILayout.BeginVertical(Theme.Panel);
             if (title != null)
                 GUILayout.Label(title.ToUpperInvariant(), Theme.SectionTitle);
@@ -245,14 +259,160 @@ namespace VirtualJoystick
                 GUILayout.Label(hint, HintStyle()); // what this input does in the aircraft you're sitting in
             GUILayout.EndVertical();
             bool capturing = _rebinding == b;
+            // Drawn in a keycap instead of by the button: a bound key's name in capitals, an empty cap with a cross, or
+            // while waiting for a key, PRESS A KEY with cycling dots.
+            bool bound = !string.IsNullOrEmpty(current) && current != "None";
             string text = capturing ? "Press a key…" : KeyDisplayName(current);
-            // Waiting for a key: filled, text in the window's colour.
-            GUIStyle keyStyle = capturing ? Theme.KeyButtonCapture : clashes.Count > 0 ? Theme.KeyButtonClash : Theme.KeyButton;
-            if (GUILayout.Button(text, keyStyle, GUILayout.ExpandWidth(true)))
+            if (bound)
+                text = text.ToUpperInvariant();
+            GUIStyle keyStyle = !capturing && clashes.Count > 0 ? Theme.KeyButtonClash : Theme.KeyButton;
+            GUIStyle drawStyle = !capturing && clashes.Count > 0 ? Theme.KeyButtonClashCapped : Theme.KeyButtonCapped;
+            if (GUILayout.Button(text, drawStyle, GUILayout.ExpandWidth(true)))
                 _rebinding = capturing ? null : b;
+            if (Event.current.type == EventType.Repaint)
+            {
+                Rect button = GUILayoutUtility.GetLastRect();
+                if (capturing)
+                {
+                    // Three steps a second: "." "..", "...". Laid out for the full "..." so the text doesn't shift.
+                    int dots = 1 + (int)(Time.unscaledTime * 3f) % 3;
+                    Keycap(button, "PRESS A KEY" + new string('.', dots), keyStyle, false, "PRESS A KEY...");
+                }
+                else
+                    Keycap(button, bound ? text : null, keyStyle);
+            }
             GUILayout.EndHorizontal();
             if (clashes.Count > 0 && !capturing)
                 GUILayout.Label("Also used by: " + string.Join(", ", clashes), Theme.WarningText);
+        }
+
+        // A bound key's name in a rounded 1 px frame like a keycap, in the colour the button's text would have (green,
+        // yellow on a clash, white on hover), centred in the button. The frame is fitted to the letters' ink, not the
+        // text box (whose side bearings and line spacing are uneven): KeycapPad of clear space between the ink and the
+        // frame on every side (the frame's own pixel not counted), at least as wide as it is tall so short names get a
+        // square cap. Vertically it always spans the capital height, so every cap in the list is the same height.
+        // No key (text null): an empty square cap, the size of a one-letter one, with a cross corner to corner; hovered,
+        // the frame and cross turn white (no fill).
+        private const float KeycapPad = 5f;
+
+        // fillOnHover false: hovered, only the frame and text turn white. layoutText: sizes and places the cap and text
+        // instead of text (which must start the same), so a changing ending doesn't move it.
+        private static void Keycap(Rect button, string text, GUIStyle style, bool fillOnHover = true, string layoutText = null)
+        {
+            Rect capLine = InkBounds("H"); // baseline and capital height
+            Rect ink = text != null ? InkBounds(layoutText ?? text) : Rect.zero;
+            if (capLine.height <= 0f || (text != null && ink.width <= 0f))
+                return;
+            float edge = KeycapPad + 1f;
+            float capH = Mathf.Round(capLine.height) + edge * 2f;
+            float capW = Mathf.Max(capH, Mathf.Round(ink.width) + edge * 2f);
+            bool hover = button.Contains(Event.current.mousePosition);
+            Color saved = GUI.color;
+            if (text == null)
+            {
+                var empty = new Rect(Mathf.Round(button.center.x - capH * 0.5f), Mathf.Round(button.center.y - capH * 0.5f), capH, capH);
+                GUI.color = hover ? Theme.Menu.Hover : style.normal.textColor;
+                Theme.Keycap.Draw(empty, false, false, false, false);
+                GUI.DrawTexture(empty, Cross((int)capH));
+                GUI.color = saved;
+                return;
+            }
+            var cap = new Rect(Mathf.Round(button.center.x - capW * 0.5f), Mathf.Round(button.center.y - capH * 0.5f), capW, capH);
+            // Where the text must be drawn so its ink sits in the middle of the cap, on the capital line.
+            float x = Mathf.Round(cap.center.x - (ink.x + ink.width * 0.5f));
+            float y = cap.y + edge - capLine.y;
+            // Styles so the frame is 9-sliced (corners kept at any size); both tinted by GUI.color. Hovered: filled
+            // white, the text in the background colour.
+            bool fill = hover && fillOnHover;
+            GUI.color = hover ? Theme.Menu.Hover : style.normal.textColor;
+            (fill ? Theme.KeycapFill : Theme.Keycap).Draw(cap, false, false, false, false);
+            if (fill)
+                GUI.color = Theme.Menu.Main;
+            Theme.KeyText.Draw(new Rect(x, y, 1000f, 100f), new GUIContent(text), false, false, false, false);
+            GUI.color = saved;
+        }
+
+        // An empty cap's cross: white (tinted when drawn), 1 px anti-aliased diagonals right into the corners, past the
+        // frame's rounding. One texture per size, drawn 1:1.
+        private static Texture2D _cross;
+
+        private static Texture2D Cross(int n)
+        {
+            if (_cross != null && _cross.width == n)
+                return _cross;
+            if (_cross != null)
+                Object.Destroy(_cross);
+            _cross = new Texture2D(n, n, TextureFormat.RGBA32, false) { hideFlags = HideFlags.HideAndDontSave, filterMode = FilterMode.Point, wrapMode = TextureWrapMode.Clamp };
+            const float inset = 0.5f; // the corner pixels' centres
+            Vector2 a0 = new Vector2(inset, inset), a1 = new Vector2(n - inset, n - inset);
+            Vector2 b0 = new Vector2(inset, n - inset), b1 = new Vector2(n - inset, inset);
+            for (int y = 0; y < n; y++)
+                for (int x = 0; x < n; x++)
+                {
+                    var p = new Vector2(x + 0.5f, y + 0.5f);
+                    float d = Mathf.Min(SegmentDistance(p, a0, a1), SegmentDistance(p, b0, b1));
+                    _cross.SetPixel(x, y, new Color(1f, 1f, 1f, Mathf.Clamp01(1f - d)));
+                }
+            _cross.Apply();
+            return _cross;
+        }
+
+        private static float SegmentDistance(Vector2 p, Vector2 a, Vector2 b)
+        {
+            Vector2 ab = b - a;
+            float t = Mathf.Clamp01(Vector2.Dot(p - a, ab) / ab.sqrMagnitude);
+            return Vector2.Distance(p, a + ab * t);
+        }
+
+        // The ink of the text in the key font, relative to where an upper-left aligned style draws it (y down), as laid
+        // out by Unity's text generator (the one IMGUI draws with). Cached per text.
+        private static readonly System.Collections.Generic.Dictionary<string, Rect> InkCache = new System.Collections.Generic.Dictionary<string, Rect>();
+        private static TextGenerator _textGen;
+        private static Font _inkFont;
+
+        private static Rect InkBounds(string text)
+        {
+            Font font = Theme.KeyText.font;
+            if (font == null)
+                return Rect.zero;
+            if (font != _inkFont)
+            {
+                InkCache.Clear();
+                _inkFont = font;
+            }
+            if (InkCache.TryGetValue(text, out Rect r))
+                return r;
+            if (_textGen == null)
+                _textGen = new TextGenerator();
+            var settings = new TextGenerationSettings
+            {
+                font = font, fontSize = Theme.KeyText.fontSize, fontStyle = FontStyle.Normal, color = Color.white,
+                lineSpacing = 1f, richText = false, scaleFactor = 1f, textAnchor = TextAnchor.UpperLeft,
+                pivot = new Vector2(0f, 1f), generationExtents = new Vector2(1000f, 100f),
+                horizontalOverflow = HorizontalWrapMode.Overflow, verticalOverflow = VerticalWrapMode.Overflow,
+                generateOutOfBounds = true, updateBounds = false,
+            };
+            _textGen.Populate(text, settings);
+            float minX = float.MaxValue, maxX = float.MinValue, minY = float.MaxValue, maxY = float.MinValue;
+            var verts = _textGen.verts;
+            // Four vertices per glyph; spaces have no area.
+            for (int i = 0; i + 3 < verts.Count; i += 4)
+            {
+                float x0 = float.MaxValue, x1 = float.MinValue, y0 = float.MaxValue, y1 = float.MinValue;
+                for (int k = 0; k < 4; k++)
+                {
+                    Vector3 p = verts[i + k].position;
+                    x0 = Mathf.Min(x0, p.x); x1 = Mathf.Max(x1, p.x);
+                    y0 = Mathf.Min(y0, -p.y); y1 = Mathf.Max(y1, -p.y); // generator's y is up
+                }
+                if (x1 - x0 < 0.01f || y1 - y0 < 0.01f)
+                    continue;
+                minX = Mathf.Min(minX, x0); maxX = Mathf.Max(maxX, x1);
+                minY = Mathf.Min(minY, y0); maxY = Mathf.Max(maxY, y1);
+            }
+            r = minX <= maxX ? new Rect(minX, minY, maxX - minX, maxY - minY) : Rect.zero;
+            InkCache[text] = r;
+            return r;
         }
 
         // Every other binding in the Bindings tab using this key, as "SECTION › Card › Action".
@@ -344,7 +504,8 @@ namespace VirtualJoystick
             public Bind[] Binds;
             public System.Func<Vector3?> Locate;
             public System.Func<bool> Available;
-            public bool ThrottleRate;
+            // Draws the card's body itself (key rows mixed with sliders / checkboxes); default: one key row per bind.
+            public System.Action<VirtualJoystickSettings, Bind[]> Body;
         }
 
         private class BindSection
@@ -401,10 +562,10 @@ namespace VirtualJoystick
             } },
             new BindSection { Title = "RIGHT HAND", Device = () => Cockpit.KeyActions.Right.DeviceName, Cards = new[]
             {
-                new BindCard { Title = "Stick movement", Binds = new[]
+                new BindCard { Title = "Stick movement", Body = StickMovementBody, Binds = new[]
                 {
-                    B("Pitch down (stick forward)", s => s.pitchDownKey, (s, v) => s.pitchDownKey = v),
                     B("Pitch up (stick back)", s => s.pitchUpKey, (s, v) => s.pitchUpKey = v),
+                    B("Pitch down (stick forward)", s => s.pitchDownKey, (s, v) => s.pitchDownKey = v),
                     B("Roll left", s => s.rollLeftKey, (s, v) => s.rollLeftKey = v),
                     B("Roll right", s => s.rollRightKey, (s, v) => s.rollRightKey = v),
                     B("Rudder left", s => s.rudderLeftKey, (s, v) => s.rudderLeftKey = v),
@@ -424,7 +585,9 @@ namespace VirtualJoystick
             } },
             new BindSection { Title = "LEFT HAND", Device = () => Cockpit.KeyActions.Left.DeviceName, Cards = new[]
             {
-                new BindCard { Title = "Throttle / collective movement", ThrottleRate = true, Binds = new[]
+                new BindCard { Title = "Throttle / collective movement",
+                    Body = (s, b) => { KeyRows(b, 0, b.Length); s.throttleRate = CardSlider("Throttle speed", s.throttleRate, 0.1f, 3f, "0.00'/s'"); },
+                    Binds = new[]
                 {
                     B("Throttle up", s => s.throttleUpKey, (s, v) => s.throttleUpKey = v, Cockpit.KeyActions.HintThrottleMove),
                     B("Throttle down", s => s.throttleDownKey, (s, v) => s.throttleDownKey = v, Cockpit.KeyActions.HintThrottleMove),
@@ -432,7 +595,9 @@ namespace VirtualJoystick
                     B("MIL power (below afterburner)", s => s.throttleMilKey, (s, v) => s.throttleMilKey = v, Cockpit.KeyActions.HintThrottleMove),
                     B("Zero throttle", s => s.throttleZeroKey, (s, v) => s.throttleZeroKey = v, Cockpit.KeyActions.HintThrottleMove),
                 } },
-                new BindCard { Title = "Trigger / modifier", Binds = new[] { B("Trigger", s => s.throttleTriggerKey, (s, v) => s.throttleTriggerKey = v, Cockpit.KeyActions.HintLeftTrigger) } },
+                new BindCard { Title = "Trigger / modifier",
+                    Body = (s, b) => { KeyRows(b, 0, b.Length); s.throttleTriggerRamp = CardSlider("Ramp-up time", s.throttleTriggerRamp, 0f, 0.8f, "0.0' s'"); },
+                    Binds = new[] { B("Trigger", s => s.throttleTriggerKey, (s, v) => s.throttleTriggerKey = v, Cockpit.KeyActions.HintLeftTrigger) } },
                 new BindCard { Title = "Menu button", Binds = new[] { B("Menu button", s => s.throttleMenuKey, (s, v) => s.throttleMenuKey = v, Cockpit.KeyActions.HintLeftMenu) } },
                 new BindCard { Title = "Second button", Binds = new[] { B("Second button", s => s.leftSecondKey, (s, v) => s.leftSecondKey = v, Cockpit.KeyActions.HintLeftSecond) } },
                 new BindCard { Title = "Thumbstick", Binds = new[]
@@ -504,6 +669,11 @@ namespace VirtualJoystick
                 new BindCard { Title = "Wheel brakes", Available = () => Cockpit.KeyActions.HasWheels, Binds = new[]
                 {
                     B("Brake", s => s.wheelBrakeKey, (s, v) => s.wheelBrakeKey = v),
+                } },
+                new BindCard { Title = "Airbrake (speed brake)", Available = () => Cockpit.KeyActions.HasAirbrake, Binds = new[]
+                {
+                    B("Hold", s => s.airbrakeHoldKey, (s, v) => s.airbrakeHoldKey = v),
+                    B("Toggle", s => s.airbrakeToggleKey, (s, v) => s.airbrakeToggleKey = v),
                 } },
                 new BindCard { Title = "Flaps", Locate = At(Cockpit.KeyActions.Flaps), Available = () => Cockpit.KeyActions.Flaps.Found, Binds = new[]
                 {
@@ -593,6 +763,81 @@ namespace VirtualJoystick
             } },
         };
 
+        // Stick movement: pitch, roll and rudder groups, each its keys then its speeds.
+        private static void StickMovementBody(VirtualJoystickSettings s, Bind[] b)
+        {
+            KeyRows(b, 0, 2);
+            s.keyboardRatePitch = CardSlider("Pitch Sensitivity", s.keyboardRatePitch, 0.5f, 10f, "0.0'/s'");
+            s.keyboardReturnRatePitch = CardToggleSlider("Pitch return to center", ref s.keyboardReturnPitch, s.keyboardReturnRatePitch, 0.5f, 10f, "0.0'/s'");
+            GUILayout.Space(GroupGap);
+            KeyRows(b, 2, 2);
+            s.keyboardRateRoll = CardSlider("Roll Sensitivity", s.keyboardRateRoll, 0.5f, 10f, "0.0'/s'");
+            s.keyboardReturnRateRoll = CardToggleSlider("Roll return to center", ref s.keyboardReturnRoll, s.keyboardReturnRateRoll, 0.5f, 10f, "0.0'/s'");
+            GUILayout.Space(GroupGap);
+            KeyRows(b, 4, 2);
+            s.rudderRate = CardSlider("Rudder Sensitivity", s.rudderRate, 0.5f, 10f, "0.0'/s'");
+        }
+
+        // Extra space between groups of rows in a card: twice the gap between two rows.
+        private const float GroupGap = Theme.Gap * 2;
+
+        private static void KeyRows(Bind[] b, int start, int count)
+        {
+            for (int i = start; i < start + count; i++)
+                KeyRow(b[i]);
+        }
+
+        // Vertical padding that gives a slider / checkbox row in a card a key row's height, its text where a key row's sits.
+        private static float CardRowPad => Theme.KeyButton.margin.top + Theme.KeyButton.padding.top - Theme.Label.padding.top;
+
+        // A slider in a card: its label in the key names' column, the slider in the keys' column.
+        private static float CardSlider(string label, float value, float min, float max, string format, bool enabled = true)
+        {
+            GUILayout.Space(CardRowPad);
+            _panelFirstRow = true; // cards space their rows themselves
+            float v = Slider(label, value, min, max, format, KeyLabelWidth, enabled);
+            GUILayout.Space(CardRowPad);
+            return v;
+        }
+
+        // A checkbox and the slider it switches on, in one card row: label in the key names' column, then the (larger)
+        // box at the start of the keys' column and the slider after it, grey and fixed while the box is off. The label
+        // and the box take the click.
+        private static float CardToggleSlider(string label, ref bool on, float value, float min, float max, string format)
+        {
+            float box = Theme.BigCheckSize;
+            const float boxGap = 6f; // box to slider, as a checkbox to its label
+            GUILayout.Space(CardRowPad);
+            GUILayout.BeginHorizontal();
+            GUILayout.Label(label, Theme.Label, GUILayout.Width(KeyLabelWidth));
+            Rect labelRect = GUILayoutUtility.GetLastRect();
+            Rect boxCol = GUILayoutUtility.GetRect(Theme.Slider.margin.left + box + boxGap, 1f,
+                GUILayout.Width(Theme.Slider.margin.left + box + boxGap), GUILayout.Height(1f));
+            float v = GUILayout.HorizontalSlider(value, min, max, on ? Theme.Slider : Theme.SliderDisabled,
+                on ? Theme.SliderThumb : Theme.SliderThumbDisabled, GUILayout.ExpandWidth(true));
+            Rect sliderRect = GUILayoutUtility.GetLastRect();
+            if (!on)
+                v = value;
+            GUILayout.Label(v.ToString(format), on ? Theme.SliderValue : Theme.SliderValueDisabled, GUILayout.Width(64f));
+            GUILayout.EndHorizontal();
+            GUILayout.Space(CardRowPad);
+
+            if (Event.current.type == EventType.Layout)
+                return v;
+            // Centred on the slider's line.
+            var boxRect = new Rect(boxCol.x + Theme.Slider.margin.left, Mathf.Round(sliderRect.center.y - box * 0.5f), box, box);
+            Vector2 mouse = Event.current.mousePosition;
+            bool hover = boxRect.Contains(mouse) || labelRect.Contains(mouse);
+            if (Event.current.type == EventType.Repaint)
+                GUI.DrawTexture(boxRect, on ? (hover ? Theme.BigCheckOnHover : Theme.BigCheckOn) : (hover ? Theme.BigCheckOffHover : Theme.BigCheckOff));
+            else if (Event.current.type == EventType.MouseDown && Event.current.button == 0 && hover)
+            {
+                on = !on;
+                Event.current.Use();
+            }
+            return v;
+        }
+
         // Thumbstick rows share one event; say which way this key pushes it.
         private static string Dir(string dir, string hint) => hint == null ? null : hint.StartsWith("(") ? hint : $"push {dir}: {hint}";
 
@@ -615,13 +860,22 @@ namespace VirtualJoystick
             foreach (var section in Sections)
             {
                 string device = section.Device?.Invoke();
+                // More room inside the corner marks than a settings section: above the title, and below the last card
+                // as much as between the title and the first card.
                 GUILayout.BeginVertical(Theme.Panel);
+                GUILayout.Space(SectionTopExtra);
                 GUILayout.Label(section.Title + (device != null ? $"   ({device})" : ""), CategoryHeader());
                 foreach (var card in section.Cards)
                     DrawCard(s, section.Title + "/" + card.Title, card);
+                GUILayout.Space(SectionBottomExtra);
                 GUILayout.EndVertical();
             }
         }
+
+        // Bindings sections: extra space above the title, and below the last card so the space under it matches the
+        // title's gap to the first card (the title's bottom padding and margin, plus the text's descent).
+        private const float SectionTopExtra = Theme.Gap;
+        private const float SectionBottomExtra = Theme.Gap;
 
         // An expanding card: header (title, number of keys bound, availability); key rows when open.
         private static void DrawCard(VirtualJoystickSettings s, string id, BindCard card)
@@ -655,17 +909,10 @@ namespace VirtualJoystick
                     HighlightPositions.Add(at.Value);
             }
             GUILayout.BeginVertical(Theme.CardBody);
-            foreach (var b in card.Binds)
-                KeyRow(b);
-            if (card.ThrottleRate)
-            {
-                // Spaced and lined up like the key rows above it: label in their name column, top and bottom gaps
-                // such that its text sits where a key row's would.
-                float pad = Theme.KeyButton.margin.top + Theme.KeyButton.padding.top - Theme.Label.padding.top;
-                GUILayout.Space(pad);
-                s.throttleRate = Slider("Throttle speed", s.throttleRate, 0.1f, 3f, "0.00'/s'", KeyLabelWidth);
-                GUILayout.Space(pad);
-            }
+            if (card.Body != null)
+                card.Body(s, card.Binds);
+            else
+                KeyRows(card.Binds, 0, card.Binds.Length);
             GUILayout.EndVertical();
             GUILayout.EndVertical(); // the frame
             // Hovering an open card's header turns its whole frame white, like a closed card's.
@@ -769,12 +1016,17 @@ namespace VirtualJoystick
         }
 
         // Label | slider | value: the slider takes all the width the label and the (right-aligned) value leave.
-        private static float Slider(string label, float value, float min, float max, string format, float labelWidth = 260f)
+        // Disabled: drawn in grey and can't be moved.
+        private static float Slider(string label, float value, float min, float max, string format, float labelWidth = 260f, bool enabled = true)
         {
+            PanelRowSpace();
             GUILayout.BeginHorizontal();
-            GUILayout.Label(label, Theme.Label, GUILayout.Width(labelWidth));
-            float v = GUILayout.HorizontalSlider(value, min, max, Theme.Slider, Theme.SliderThumb, GUILayout.ExpandWidth(true));
-            GUILayout.Label(v.ToString(format), Theme.SliderValue, GUILayout.Width(64f));
+            GUILayout.Label(label, enabled ? Theme.Label : Theme.LabelDisabled, GUILayout.Width(labelWidth));
+            float v = GUILayout.HorizontalSlider(value, min, max, enabled ? Theme.Slider : Theme.SliderDisabled,
+                enabled ? Theme.SliderThumb : Theme.SliderThumbDisabled, GUILayout.ExpandWidth(true));
+            if (!enabled)
+                v = value;
+            GUILayout.Label(v.ToString(format), enabled ? Theme.SliderValue : Theme.SliderValueDisabled, GUILayout.Width(64f));
             GUILayout.EndHorizontal();
             return v;
         }
@@ -783,6 +1035,7 @@ namespace VirtualJoystick
         private static bool Toggle(string label, bool value)
         {
             // The box is as tall as the text's capitals, centred on the text line.
+            PanelRowSpace();
             float box = Theme.CheckSize;
             Rect row = GUILayoutUtility.GetRect(new GUIContent(label), Theme.Label, GUILayout.ExpandWidth(true), GUILayout.MinHeight(box + 8f));
             bool hover = row.Contains(Event.current.mousePosition);

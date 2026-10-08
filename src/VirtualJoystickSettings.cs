@@ -52,6 +52,9 @@ namespace VirtualJoystick
         // How quickly keyboard input returns to centre once the keys are released (per second).
         public float keyboardReturnRatePitch = 4.8f;
         public float keyboardReturnRateRoll = 4.8f;
+        // Off: that axis stays where the keys left it instead of returning to centre.
+        public bool keyboardReturnPitch = true;
+        public bool keyboardReturnRoll = true;
 
         // Bindings tab. Stick = right VR controller, throttle = left VR controller, aircraft = named cockpit
         // controls found in whatever aircraft you fly. All global (the same keys in every aircraft).
@@ -72,7 +75,8 @@ namespace VirtualJoystick
         public string throttleFullKey = "Alpha1";   // full throttle (afterburner on aircraft that have it)
         public string throttleMilKey = "Alpha2";    // military power: just below the afterburner detent
         public string throttleZeroKey = "Alpha3";   // idle / minimum
-        public string throttleTriggerKey = "None";
+        public string throttleTriggerKey = "B";
+        public float throttleTriggerRamp = 0.2f;  // seconds for the trigger axis to go from 0 to full while held
         public string throttleMenuKey = "None";
         public string leftSecondKey = "None";      // second button, when the left controller is a stick (EF-24 rear seat)
         public string throttleThumbLeftKey = "None";
@@ -119,7 +123,9 @@ namespace VirtualJoystick
         public string parkingBrakeOnKey = "None";   // brake lock
         public string parkingBrakeOffKey = "None";
         public string parkingBrakeToggleKey = "H";
-        public string wheelBrakeKey = "B";          // wheel brakes, while held
+        public string wheelBrakeKey = "None";          // wheel brakes, while held
+        public string airbrakeHoldKey = "None";     // airbrake (speed brake), while held
+        public string airbrakeToggleKey = "None";   // airbrake: press for full, press again to retract
         public string flapsDownKey = "None";      // one step more flaps
         public string flapsUpKey = "None";        // one step less flaps
         public string flapsCycleKey = "F";
