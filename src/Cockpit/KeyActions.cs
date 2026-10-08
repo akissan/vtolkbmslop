@@ -222,12 +222,61 @@ namespace VirtualJoystick.Cockpit
                             _cover = c;
             }
 
-            private bool Matches(string name, bool exact)
+            private bool Matches(string name, bool exact) => NameMatches(_names, name, exact);
+        }
+
+        // Exact also allows a seat suffix ("Engine R (Front)"), so both seats' copies compete on distance.
+        private static bool NameMatches(string[] names, string name, bool exact)
+        {
+            if (exact && name.EndsWith(")"))
             {
-                foreach (var n in _names)
-                    if (exact ? string.Equals(name, n, StringComparison.OrdinalIgnoreCase) : name.IndexOf(n, StringComparison.OrdinalIgnoreCase) >= 0)
-                        return true;
-                return false;
+                int open = name.LastIndexOf(" (", StringComparison.Ordinal);
+                if (open > 0 && NameMatches(names, name.Substring(0, open), true))
+                    return true;
+            }
+            foreach (var n in names)
+                if (exact ? string.Equals(name, n, StringComparison.OrdinalIgnoreCase) : name.IndexOf(n, StringComparison.OrdinalIgnoreCase) >= 0)
+                    return true;
+            return false;
+        }
+
+        // A push button found by the game's control name (exact, seat suffix allowed), nearest to the pilot's head.
+        public class NamedButton
+        {
+            private readonly string[] _names;
+            public VRInteractable Interactable;
+
+            public NamedButton(params string[] names) => _names = names;
+
+            public bool Found => Interactable != null;
+            public Vector3 Position => Interactable != null ? Interactable.transform.position : Vector3.zero;
+
+            // A VR finger push: VRButton listens to OnInteract / OnStopInteract only.
+            public void Press()
+            {
+                if (!Found)
+                    return;
+                var v = Interactable;
+                Guard(_names[0], () => v.OnInteract?.Invoke());
+                Guard(_names[0], () => v.OnStopInteract?.Invoke());
+            }
+
+            public void Find(VRInteractable[] all, Vector3 head)
+            {
+                Interactable = null;
+                float best = float.MaxValue;
+                foreach (var vi in all)
+                {
+                    string n = vi.GetControlReferenceName();
+                    if (string.IsNullOrEmpty(n) || !NameMatches(_names, n, true) || vi.GetComponent<VRButton>() == null)
+                        continue;
+                    float d = (vi.transform.position - head).sqrMagnitude;
+                    if (d < best)
+                    {
+                        best = d;
+                        Interactable = vi;
+                    }
+                }
             }
         }
 
@@ -236,8 +285,8 @@ namespace VirtualJoystick.Cockpit
         public static readonly NamedControl LaunchBar = new NamedControl("Launch bar", "Launch Bar");
         public static readonly NamedControl Hook = new NamedControl("Arrestor hook", "Arrestor Hook", "Tail Hook");
         public static readonly NamedControl Radar = new NamedControl("Radar power", "Radar Power");
-        public static readonly NamedControl Engine1 = new NamedControl("Engine 1", "Left Engine", "Engine 1", "Engine");
-        public static readonly NamedControl Engine2 = new NamedControl("Engine 2", "Right Engine", "Engine 2");
+        public static readonly NamedControl Engine1 = new NamedControl("Engine 1", "Left Engine", "Engine 1", "Engine L", "Engine");
+        public static readonly NamedControl Engine2 = new NamedControl("Engine 2", "Right Engine", "Engine 2", "Engine R");
         public static readonly NamedControl Apu = new NamedControl("APU", "APU");
         public static readonly NamedControl Battery = new NamedControl("Main battery", "Main Battery", "Battery");
         public static readonly NamedControl Canopy = new NamedControl("Canopy", "Canopy");
@@ -245,7 +294,27 @@ namespace VirtualJoystick.Cockpit
         public static readonly NamedControl MasterArm = new NamedControl("Master arm", "Master Arm");
         // Only some aircraft have an RWR mode lever; the rest switch the RWR display directly (Rwr below).
         public static readonly NamedControl RwrSwitch = new NamedControl("RWR", "RWR Mode", "RWR");
-        private static readonly NamedControl[] Named = { Flaps, Gear, LaunchBar, Hook, Radar, Engine1, Engine2, Apu, Battery, Canopy, ParkingBrake, MasterArm, RwrSwitch };
+        // EF-24: EW / WPN knob, state 0 = WPN, 1 = EW.
+        public static readonly NamedControl MasterMode = new NamedControl("Master mode (EW / WPN)", "Master Mode");
+        private static readonly NamedControl[] Named = { Flaps, Gear, LaunchBar, Hook, Radar, Engine1, Engine2, Apu, Battery, Canopy, ParkingBrake, MasterArm, RwrSwitch, MasterMode };
+
+        // Aircraft without a master arm switch (EF-24) have an ARM and a SAFE push button instead.
+        public static readonly NamedButton ArmButton = new NamedButton("Master Arm");
+        public static readonly NamedButton SafeButton = new NamedButton("Master Safe");
+        // EF-24 AA / AG buttons, under the MASTER MODE label.
+        public static readonly NamedButton AaButton = new NamedButton("AA Mode");
+        public static readonly NamedButton AgButton = new NamedButton("AG Mode");
+        private static readonly NamedButton[] Buttons = { ArmButton, SafeButton, AaButton, AgButton };
+
+        public static bool HasMasterArm => MasterArm.Found || ArmButton.Found;
+        public static Vector3? MasterArmPosition =>
+            MasterArm.Found ? MasterArm.Position : ArmButton.Found ? Mid(ArmButton, SafeButton) : (Vector3?)null;
+        public static Vector3? ArmingPosition => AaButton.Found ? Mid(AaButton, AgButton) : (Vector3?)null;
+
+        private static Vector3 Mid(NamedButton a, NamedButton b) => b.Found ? (a.Position + b.Position) * 0.5f : a.Position;
+
+        // Master arm state, for the toggle key with ARM / SAFE buttons.
+        private static WeaponManager _wm;
 
         // The RWR display: its mode is 0 = on, 1 = mute (silent), 2 = off.
         public static DashRWR Rwr { get; private set; }
@@ -307,6 +376,9 @@ namespace VirtualJoystick.Cockpit
             TiltKeys.Clear();
             foreach (var n in Named)
                 n.Interactable = null;
+            foreach (var b in Buttons)
+                b.Interactable = null;
+            _wm = null;
         }
 
         public static void Update(GameObject vehicle, bool inputAllowed)
@@ -348,7 +420,15 @@ namespace VirtualJoystick.Cockpit
             if (Pressed(S.airbrakeToggleKey)) _airbrakeToggled = !_airbrakeToggled;
             SetAirbrake(Held(S.airbrakeHoldKey) || _airbrakeToggled);
             SetCountermeasures(Held(S.countermeasureKey));
-            OnOffToggle(MasterArm, S.masterArmOnKey, S.masterArmOffKey, S.masterArmToggleKey);
+            if (MasterArm.Found)
+                OnOffToggle(MasterArm, S.masterArmOnKey, S.masterArmOffKey, S.masterArmToggleKey);
+            else if (ArmButton.Found)
+            {
+                bool armed = _wm != null && _wm.isMasterArmed;
+                if (Pressed(S.masterArmOnKey) || (Pressed(S.masterArmToggleKey) && !armed)) ArmButton.Press();
+                else if (Pressed(S.masterArmOffKey) || (Pressed(S.masterArmToggleKey) && armed)) SafeButton.Press();
+            }
+            OnOffToggle(MasterMode, S.masterModeEwKey, S.masterModeWpnKey, S.masterModeToggleKey);
 
             if (Pressed(S.rwrOnKey)) SetRwr(0);
             if (Pressed(S.rwrMuteKey)) SetRwr(1);
@@ -544,6 +624,9 @@ namespace VirtualJoystick.Cockpit
             Vector3 headWorld = root.TransformPoint(head);
             foreach (var n in Named)
                 n.Find(all, covers, headWorld);
+            foreach (var b in Buttons)
+                b.Find(all, headWorld);
+            _wm = _vehicle.GetComponentInChildren<WeaponManager>(true);
             Rwr = Nearest(_vehicle.GetComponentsInChildren<DashRWR>(true), headWorld);
             Arming = Nearest(_vehicle.GetComponentsInChildren<VTOLVR.DLC.EW.EF24Hotas>(true), headWorld);
             _wheels = _vehicle.GetComponentsInChildren<WheelsController>(true);
@@ -554,6 +637,8 @@ namespace VirtualJoystick.Cockpit
             var found = new List<string>();
             foreach (var n in Named)
                 found.Add(n.Title + (n.Found ? "" : " (missing)"));
+            if (ArmButton.Found)
+                found.Add("Master arm buttons");
             if (Rwr != null)
                 found.Add("RWR display");
             if (Arming != null)

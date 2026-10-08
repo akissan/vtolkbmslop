@@ -160,6 +160,10 @@ namespace VirtualJoystick
         public string armingAaKey = "None";
         public string armingAgKey = "None";
         public string armingToggleKey = "None";
+        // EW / WPN master mode knob (EF-24).
+        public string masterModeEwKey = "None";
+        public string masterModeWpnKey = "None";
+        public string masterModeToggleKey = "None";
         // TGP zoom: one step in per tap, back to the widest after the narrowest. "BackQuote" = the ~ key.
         public string tgpZoomCycleKey = "BackQuote";
         // Holding the zoom cycle key this long snaps straight to the widest (1x) zoom. 0 = no hold action (steps on press).

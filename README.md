@@ -68,7 +68,7 @@ A short, fixed set of keyboard bindings that apply to every aircraft:
 
 Aircraft controls are found by the game's own control names (e.g. "Landing Gear"); a card says
 "not in this aircraft" when the current jet doesn't have one. Opening an aircraft card marks that
-control in the cockpit with a pulsing orange ring. Keys used in more than one place show in yellow.
+control in the cockpit with a green ring, joined to its card by a line. Keys used in more than one place show in yellow.
 
 ## Settings
 

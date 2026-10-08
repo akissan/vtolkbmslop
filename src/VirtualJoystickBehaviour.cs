@@ -955,20 +955,31 @@ namespace VirtualJoystick
                 // SOI mode with the stick off: no stick to show, just the title where the stick overlay puts it.
                 DrawOverlayTitle(SoiTitle);
 
-            // Bindings tab: mark the cockpit controls whose cards are open, so you can see which switch is which.
+            // Bindings tab: ring the cockpit controls whose cards are open, each joined by a line to the window
+            // edge beside its card (the window draws on top, so the line stops at its edge), so you can see which
+            // switch is which.
             if (SettingsWindow.IsOpen)
             {
-                float pulse = 0.6f + 0.4f * Mathf.Sin(Time.unscaledTime * 6f);
-                foreach (var world in SettingsWindow.HighlightPositions)
+                Color mark = Theme.Menu.Text;
+                Rect win = SettingsWindow.WindowRect;
+                _ringsDrawn.Clear();
+                foreach (var h in SettingsWindow.Highlights)
                 {
-                    if (!ScreenPointer.WorldToGui(world, out Vector2 g))
+                    Vector3? world = h.Locate();
+                    if (!world.HasValue || !ScreenPointer.WorldToGui(world.Value, out Vector2 g))
                         continue;
-                    var mark = new Color(1f, 0.55f, 0.15f, pulse);
-                    DrawRing(g, 14f, mark, 2.5f);
-                    DrawLine(g + new Vector2(-24f, 0f), g + new Vector2(-16f, 0f), 2f, mark);
-                    DrawLine(g + new Vector2(16f, 0f), g + new Vector2(24f, 0f), 2f, mark);
-                    DrawLine(g + new Vector2(0f, -24f), g + new Vector2(0f, -16f), 2f, mark);
-                    DrawLine(g + new Vector2(0f, 16f), g + new Vector2(0f, 24f), 2f, mark);
+                    // Cards on the same control share one ring.
+                    bool dup = false;
+                    foreach (var other in _ringsDrawn)
+                        dup |= (other - g).sqrMagnitude < 1f;
+                    _ringsDrawn.Add(g);
+                    if (!dup)
+                        DrawThickRing(g, HighlightRadius, 6f, mark);
+                    if (win.Contains(g))
+                        continue;
+                    var end = new Vector2(g.x < win.center.x ? win.xMin : win.xMax, h.CardY);
+                    Vector2 dir = (end - g).normalized;
+                    DrawLine(g + dir * HighlightRadius, end, 2f, mark);
                 }
             }
 
@@ -1270,6 +1281,24 @@ namespace VirtualJoystick
         }
 
         private readonly Vector2[] _edgeFrom = new Vector2[4], _edgeDir = new Vector2[4], _inner = new Vector2[4];
+
+        private const float HighlightRadius = 16f;
+        private readonly System.Collections.Generic.List<Vector2> _ringsDrawn = new System.Collections.Generic.List<Vector2>();
+
+        // Solid annulus of the given width centred on radius, one quad per segment so there are no joints.
+        private void DrawThickRing(Vector2 c, float radius, float width, Color color)
+        {
+            const int segments = 48;
+            float rIn = radius - width * 0.5f, rOut = radius + width * 0.5f;
+            Vector2 dirPrev = new Vector2(1f, 0f);
+            for (int i = 1; i <= segments; i++)
+            {
+                float ang = i * Mathf.PI * 2f / segments;
+                var dir = new Vector2(Mathf.Cos(ang), Mathf.Sin(ang));
+                FillQuad(c + dirPrev * rIn, c + dirPrev * rOut, c + dir * rOut, c + dir * rIn, color);
+                dirPrev = dir;
+            }
+        }
 
         private void DrawRing(Vector2 c, float radius, Color color, float width = 1.5f)
         {

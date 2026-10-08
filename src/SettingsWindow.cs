@@ -13,6 +13,9 @@ namespace VirtualJoystick
 
         public static bool IsOpen { get; private set; }
 
+        // Where the window is on screen (GUI coordinates, y down).
+        public static Rect WindowRect => _rect;
+
         // True while the cursor is over the window, so FlatScreen 3 doesn't click cockpit controls behind it.
         public static bool CursorOverWindow
         {
@@ -74,7 +77,7 @@ namespace VirtualJoystick
             // Window callbacks run after the rest of OnGUI, so the overlay draws the markers gathered here one
             // frame later: rebuild the list on each Repaint pass.
             if (Event.current.type == EventType.Repaint)
-                HighlightPositions.Clear();
+                Highlights.Clear();
 
             // The tab drawn this event is the one the layout pass used; a newly picked tab shows from the next frame.
             int shown = _tab;
@@ -114,6 +117,18 @@ namespace VirtualJoystick
             else
                 DrawBindingsTab(s);
             GUILayout.EndScrollView();
+            // Cards scrolled out of view: their leader lines end at the top or bottom of the list instead.
+            if (Event.current.type == EventType.Repaint && Highlights.Count > 0)
+            {
+                Rect view = GUILayoutUtility.GetLastRect();
+                float top = GUIUtility.GUIToScreenPoint(view.position).y;
+                for (int i = 0; i < Highlights.Count; i++)
+                {
+                    var h = Highlights[i];
+                    h.CardY = Mathf.Clamp(h.CardY, top + 4f, top + view.height - 4f);
+                    Highlights[i] = h;
+                }
+            }
 
             GUILayout.Space(Theme.Gap * 2);
             if (_rebinding != null)
@@ -497,7 +512,7 @@ namespace VirtualJoystick
         // ------------------------------------------------------------------ bindings tab
 
         // A card: a group of keys under one control. Locate (optional) gives the cockpit control's position for the
-        // orange marker; Available (optional) says whether the current aircraft has it.
+        // green marker; Available (optional) says whether the current aircraft has it.
         private class BindCard
         {
             public string Title;
@@ -729,17 +744,25 @@ namespace VirtualJoystick
                     B("Off", s => s.rwrOffKey, (s, v) => s.rwrOffKey = v),
                     B("Cycle (on, mute, off)", s => s.rwrCycleKey, (s, v) => s.rwrCycleKey = v),
                 } },
-                new BindCard { Title = "Master arm", Locate = At(Cockpit.KeyActions.MasterArm), Available = () => Cockpit.KeyActions.MasterArm.Found, Binds = new[]
+                new BindCard { Title = "Master arm", Locate = () => Cockpit.KeyActions.MasterArmPosition, Available = () => Cockpit.KeyActions.HasMasterArm, Binds = new[]
                 {
                     B("On (lifts the cover)", s => s.masterArmOnKey, (s, v) => s.masterArmOnKey = v),
                     B("Off", s => s.masterArmOffKey, (s, v) => s.masterArmOffKey = v),
                     B("Toggle", s => s.masterArmToggleKey, (s, v) => s.masterArmToggleKey = v),
                 } },
-                new BindCard { Title = "Arming mode (AA / AG)", Available = () => Cockpit.KeyActions.Arming != null, Binds = new[]
+                new BindCard { Title = "Arming mode (AA / AG)", Locate = () => Cockpit.KeyActions.ArmingPosition,
+                    Available = () => Cockpit.KeyActions.Arming != null, Binds = new[]
                 {
                     B("Air-to-air (AA)", s => s.armingAaKey, (s, v) => s.armingAaKey = v),
                     B("Air-to-ground (AG)", s => s.armingAgKey, (s, v) => s.armingAgKey = v),
                     B("Toggle", s => s.armingToggleKey, (s, v) => s.armingToggleKey = v),
+                } },
+                new BindCard { Title = "Master mode (EW / WPN)", Locate = At(Cockpit.KeyActions.MasterMode),
+                    Available = () => Cockpit.KeyActions.MasterMode.Found, Binds = new[]
+                {
+                    B("Electronic warfare (EW)", s => s.masterModeEwKey, (s, v) => s.masterModeEwKey = v),
+                    B("Weapons (WPN)", s => s.masterModeWpnKey, (s, v) => s.masterModeWpnKey = v),
+                    B("Toggle", s => s.masterModeToggleKey, (s, v) => s.masterModeToggleKey = v),
                 } },
                 new BindCard { Title = "TGP zoom", Available = () => Cockpit.SoiKeys.HasTgp, Binds = new[]
                 {
@@ -843,8 +866,17 @@ namespace VirtualJoystick
 
         private static readonly System.Collections.Generic.HashSet<string> OpenCards = new System.Collections.Generic.HashSet<string>();
 
-        // World positions of the aircraft controls whose cards are open: the overlay marks them in the cockpit.
-        public static readonly System.Collections.Generic.List<Vector3> HighlightPositions = new System.Collections.Generic.List<Vector3>();
+        // An open card's cockpit control: Locate finds it (asked again when the overlay draws, a frame after the
+        // window: a position kept from here would trail a moving aircraft); CardY is the card's middle on screen
+        // (GUI y), where the overlay's leader line meets the window.
+        public struct Highlight
+        {
+            public System.Func<Vector3?> Locate;
+            public float CardY;
+        }
+
+        // The aircraft controls whose cards are open: the overlay rings them in the cockpit and joins each to its card.
+        public static readonly System.Collections.Generic.List<Highlight> Highlights = new System.Collections.Generic.List<Highlight>();
 
         private static void DrawBindingsTab(VirtualJoystickSettings s)
         {
@@ -902,12 +934,6 @@ namespace VirtualJoystick
             }
             if (!open)
                 return;
-            if (card.Locate != null && Event.current.type == EventType.Repaint)
-            {
-                Vector3? at = card.Locate();
-                if (at.HasValue)
-                    HighlightPositions.Add(at.Value);
-            }
             GUILayout.BeginVertical(Theme.CardBody);
             if (card.Body != null)
                 card.Body(s, card.Binds);
@@ -915,9 +941,14 @@ namespace VirtualJoystick
                 KeyRows(card.Binds, 0, card.Binds.Length);
             GUILayout.EndVertical();
             GUILayout.EndVertical(); // the frame
+            if (Event.current.type != EventType.Repaint)
+                return;
+            Rect frame = GUILayoutUtility.GetLastRect();
+            if (card.Locate != null)
+                Highlights.Add(new Highlight { Locate = card.Locate, CardY = GUIUtility.GUIToScreenPoint(frame.center).y });
             // Hovering an open card's header turns its whole frame white, like a closed card's.
-            if (headerHover && Event.current.type == EventType.Repaint)
-                Outline(GUILayoutUtility.GetLastRect(), Theme.Menu.Hover);
+            if (headerHover)
+                Outline(frame, Theme.Menu.Hover);
         }
 
         private static int CountBound(Bind[] binds)
