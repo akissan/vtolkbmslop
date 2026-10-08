@@ -18,9 +18,19 @@ namespace VirtualJoystick
         public static readonly Color Text = Hex(0xCCDACB, 1f);            // grey with a little green
         public static readonly Color Muted = Hex(0x8A9989, 1f);
         // The green of the aircraft HUD and helmet symbology (the game's most used UI green). Also the screen hover
-        // outline, the overlay title and messages.
+        // outline and the hovered button's labels.
         public static readonly Color HudGreen = new Color(0.67f, 1f, 0.08f, 1f);
         public static readonly Color Accent = HudGreen;
+
+        // The portal MFD buttons' hover (read from the F-45A prefab) is a hard white frame, a 9-sliced sprite with a
+        // solid 4/128 px edge: about 1/26 of the button's height, no glow, no fill (the screen hover outline copies
+        // the shape, in HUD green).
+        // The HUD and helmet HMCS text and symbols (read from the aircraft prefabs): VeraMono in HudGreen at 85% alpha
+        // (a few aircraft's HMCS use a bluer (0.641, 1, 0.309)), material mat_HUD-UI with the game's UI/DefaultOverlay2
+        // shader (UI/Default with additive "Blend SrcAlpha One", no depth test). Used for the overlay title and
+        // messages, drawn the same way.
+        public const string HmcsShaderName = "UI/DefaultOverlay2";
+        public const float OverlayTextOpacity = 0.85f;
         public static readonly Color CheckOffFill = Hex(0x111512, 1f);
         public static readonly Color CheckBorder = Hex(0x6A786B, 1f);
         public static readonly Color Warning = Hex(0xF2C14E, 1f);

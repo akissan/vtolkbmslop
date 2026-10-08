@@ -338,6 +338,9 @@ namespace VirtualJoystick
             public readonly List<UnityEngine.UI.Graphic> Images = new List<UnityEngine.UI.Graphic>();
             // Background panels that may frame the labels, nearest first: one list per hierarchy level (see PanelHitbox).
             public readonly List<List<UnityEngine.UI.Image>> Panels = new List<List<UnityEngine.UI.Image>>();
+            // The game's own hover frame, when the element has one (see HoverFrameHitbox).
+            public VRIHoverToggle HoverToggle;
+            public MFDPortalPageSelectButton PageButton;
 
             // Cached drawn hitbox, in Plane's local space (so it follows the element if the page moves).
             public bool Cached;
@@ -417,7 +420,11 @@ namespace VirtualJoystick
 
         private static ElementVisuals CollectVisuals(VRInteractable v)
         {
-            var vis = new ElementVisuals();
+            var vis = new ElementVisuals
+            {
+                HoverToggle = v.GetComponent<VRIHoverToggle>(),
+                PageButton = v.GetComponent<MFDPortalPageSelectButton>(),
+            };
             foreach (var g in v.GetComponentsInChildren<UnityEngine.UI.Graphic>(true))
             {
                 if (g.GetComponentInParent<VRInteractable>(true) != v)
@@ -637,11 +644,54 @@ namespace VirtualJoystick
             return plane != null;
         }
 
+        // VRIHoverToggle under a VRHoverToggleMaster destroys its hover frame in Awake and keeps only where it was;
+        // on hover it borrows a pooled frame and puts it there.
+        private static readonly FieldInfo HoverParentField = AccessTools.Field(typeof(VRIHoverToggle), "hParent");
+        private static readonly FieldInfo HoverPosField = AccessTools.Field(typeof(VRIHoverToggle), "hPos");
+        private static readonly FieldInfo HoverScaleField = AccessTools.Field(typeof(VRIHoverToggle), "hScale");
+        private static readonly FieldInfo HoverRotField = AccessTools.Field(typeof(VRIHoverToggle), "hRot");
+        private static readonly FieldInfo HoverWidthField = AccessTools.Field(typeof(VRIHoverToggle), "hWidth");
+        private static readonly FieldInfo HoverHeightField = AccessTools.Field(typeof(VRIHoverToggle), "hHeight");
+
+        // The frame the game itself shows when a VR finger hovers the button: exactly the button as drawn, so it's
+        // the best hitbox there is. Small glyph labels ("+", "-") padded out don't fit their box; this does.
+        private static bool HoverFrameHitbox(ElementVisuals vis, out Transform plane, out Rect rect, out float z)
+        {
+            plane = null;
+            rect = default;
+            z = 0f;
+            var toggle = vis.HoverToggle;
+            if (toggle != null && HoverParentField?.GetValue(toggle) is Transform parent && parent != null)
+            {
+                // Pooled: rebuild the frame in its parent's space (the pool template's pivot, no rotation).
+                var master = toggle.GetComponentInParent<VRHoverToggleMaster>();
+                if (!(HoverRotField.GetValue(toggle) is Quaternion rot) || Quaternion.Angle(rot, Quaternion.identity) > 1f)
+                    return false;
+                Vector3 pos = (Vector3)HoverPosField.GetValue(toggle), scale = (Vector3)HoverScaleField.GetValue(toggle);
+                float w = (float)HoverWidthField.GetValue(toggle) * scale.x, h = (float)HoverHeightField.GetValue(toggle) * scale.y;
+                Vector2 pivot = master != null && master.hoverObjTemplate != null && master.hoverObjTemplate.transform is RectTransform tmpl
+                    ? tmpl.pivot : new Vector2(0.5f, 0.5f);
+                if (w <= 1e-4f || h <= 1e-4f)
+                    return false;
+                plane = parent;
+                rect = new Rect(pos.x - pivot.x * w, pos.y - pivot.y * h, w, h);
+                z = pos.z;
+                return parent.gameObject.activeInHierarchy;
+            }
+            GameObject frame = toggle != null ? toggle.hoverObj : vis.PageButton != null ? vis.PageButton.hoverObj : null;
+            if (frame == null || !(frame.transform is RectTransform rt) || !HasSize(rt))
+                return false;
+            plane = rt;
+            rect = rt.rect;
+            return true;
+        }
+
         // Hitbox = what you see, as close to the label as possible, so neighbouring buttons don't overlap.
         // (The buttons' own RectTransforms are often far bigger than the button: 12 x 12 cm on the F-45 MFDs.)
-        //  1. the background panel around the label(s), else the drawn label(s), padded a little;
-        //  2. else the smallest drawn icon;
-        //  3. else the game's own VR rect (useRect), 4. the element's RectTransform, 5. a sphere of `radius`.
+        //  1. the game's own hover frame;
+        //  2. the background panel around the label(s), else the drawn label(s), padded a little;
+        //  3. else the smallest drawn icon;
+        //  4. else the game's own VR rect (useRect), 5. the element's RectTransform, 6. a sphere of `radius`.
         private static bool TryHit(VRInteractable v, Ray ray, out Hit hit)
         {
             hit = default;
@@ -649,6 +699,11 @@ namespace VirtualJoystick
             Transform t = v.transform;
             if (Visuals.TryGetValue(v, out ElementVisuals vis))
             {
+                if (HoverFrameHitbox(vis, out Transform frame, out Rect frameRect, out float frameZ))
+                {
+                    hit.Shape = "hover frame";
+                    return HitLocalRect(frame, frameRect, frameZ, ray, ref hit);
+                }
                 string kind = DrawnHitbox(vis, out Transform plane, out Rect drawn);
                 if (kind != null)
                 {

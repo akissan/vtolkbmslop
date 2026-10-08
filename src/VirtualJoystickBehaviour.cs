@@ -131,6 +131,7 @@ namespace VirtualJoystick
             SceneManager.activeSceneChanged -= OnSceneChanged;
             Deactivate(silent: true);
             if (_white != null) Destroy(_white);
+            if (_hmcsTextMaterial != null) Destroy(_hmcsTextMaterial);
             if (_dot != null) Destroy(_dot);
         }
 
@@ -970,30 +971,30 @@ namespace VirtualJoystick
             }
 
             // Outline of the screen element under the cursor: the real hitbox ScreenPointer will press. Always shown:
-            // it's the only sign of what's hovered. Layout preset held (tap loads, a long hold saves): the outline
-            // fills left to right, full = saved.
+            // it's the only sign of what's hovered. Drawn like the MFD's own hover: a hard frame inside the
+            // element. Layout preset held (tap loads, a long hold saves): the element fills left to right faintly,
+            // full = saved. Whole touch surfaces get a fainter frame.
             float hold = ScreenPointer.PresetHoldProgress;
             if (ScreenPointer.TryGetHoverOutline(_outline))
             {
                 Color green = ScreenPointer.HoverColor;
-                Color c = ScreenPointer.HoverIsTouchSurface ? new Color(green.r, green.g, green.b, 0.35f) : new Color(green.r, green.g, green.b, 0.9f);
+                Color c = ScreenPointer.HoverIsTouchSurface ? new Color(green.r, green.g, green.b, 0.4f) : green;
                 if (hold > 0f)
                 {
                     Vector2 bottom = Vector2.Lerp(_outline[0], _outline[1], hold);
                     Vector2 top = Vector2.Lerp(_outline[3], _outline[2], hold);
-                    FillQuad(_outline[0], bottom, top, _outline[3], new Color(c.r, c.g, c.b, 0.7f));
+                    FillQuad(_outline[0], bottom, top, _outline[3], new Color(green.r, green.g, green.b, 0.3f));
                 }
-                for (int i = 0; i < 4; i++)
-                    DrawLine(_outline[i], _outline[(i + 1) % 4], 1.5f, c);
+                FrameQuad(_outline, c);
             }
             if (S.showScreenTooltip && ScreenPointer.HoverInfo != null)
                 DrawTooltip(ScreenPointer.HoverInfo);
 
             if (_toast != null && Time.unscaledTime < _toastUntil)
             {
-                // Same style as the overlay title (no "* "), on the line above it; fades out over its last 0.4 s.
+                // Same style as the overlay title, on the line above it; fades out over its last 0.4 s.
                 float alpha = Mathf.Clamp01((_toastUntil - Time.unscaledTime) / 0.4f);
-                DrawLabel(TitleLine(1), _toast.ToUpperInvariant(), new Color(TitleColor.r, TitleColor.g, TitleColor.b, alpha));
+                DrawLabel(TitleLine(1), _toast.ToUpperInvariant(), alpha);
             }
         }
 
@@ -1022,20 +1023,19 @@ namespace VirtualJoystick
         // Free look and SOI cursor mode: the mouse isn't flying, so the stick overlay goes grey and fainter.
         private bool OverlayPassive => _freeLook || SoiMode;
         private static Color PassiveColor(float a) => new Color(0.7f, 0.7f, 0.7f, a);
-        private string SoiTitle => _soi.Label;
+        // "* TGP", "* RADAR" ...: the asterisk marks the SOI page, as the MFDs do. None found: just "NO SOI".
+        private string SoiTitle => _soi.Current == SoiCursor.Kind.None ? _soi.Label : "* " + _soi.Label;
 
-        // Overlay title and toast messages: HUD green in the HUD's font, "* " prefix.
-        private static Color TitleColor => Theme.HudGreen;
-
-        // Text line centred above the control area: 0 = overlay title, 1 = the line above it (toasts).
+        // Text line centred above the control area: 0 = overlay title, 1 = the line above it (toasts). One line is
+        // a label box's height plus a small gap.
         private Rect TitleLine(int line)
         {
             float size = S.overlaySize;
             float top = Screen.height * 0.5f - size * 0.5f;
-            return new Rect(Screen.width * 0.5f - size * 0.5f - 100f, top - 24f - line * 20f, size + 200f, 20f);
+            return new Rect(Screen.width * 0.5f - size * 0.5f - 100f, top - 28f - line * 26f, size + 200f, 22f);
         }
 
-        private void DrawOverlayTitle(string title) => DrawLabel(TitleLine(0), "* " + title, TitleColor);
+        private void DrawOverlayTitle(string title) => DrawLabel(TitleLine(0), title, 1f);
 
         private void DrawStickOverlay()
         {
@@ -1155,7 +1155,7 @@ namespace VirtualJoystick
                     fontStyle = FontStyle.Bold,
                 };
             }
-            // The HUD's font once it's loaded (the default bold font until then).
+            // The HUD's font once it's loaded (the default bold font until then); the MFD buttons use the same face.
             if (_labelStyle.font != Theme.HudFont && Theme.HudFont != null)
             {
                 _labelStyle.font = Theme.HudFont;
@@ -1222,6 +1222,53 @@ namespace VirtualJoystick
             GL.PopMatrix();
         }
 
+        // Hard frame on the inside of a quad (GUI points, y down, in order around it), like the MFD's 9-sliced hover
+        // sprite: each edge moved inwards by the thickness, mitred corners, no gaps or overlaps. Thickness is 1/26 of
+        // the shorter side (the MFD frame on its button), kept between 1.5 and 3 px.
+        private void FrameQuad(Vector2[] q, Color color)
+        {
+            float shortest = float.MaxValue;
+            Vector2 centre = Vector2.zero;
+            for (int i = 0; i < 4; i++)
+            {
+                shortest = Mathf.Min(shortest, (q[(i + 1) % 4] - q[i]).magnitude);
+                centre += q[i] * 0.25f;
+            }
+            if (shortest < 1f)
+                return;
+            float t = Mathf.Min(Mathf.Clamp(shortest / 26f, 1.5f, 3f), shortest * 0.25f);
+
+            // Edge i runs q[i] -> q[i+1], moved towards the centre; inner corner i is where edges i-1 and i meet.
+            for (int i = 0; i < 4; i++)
+            {
+                Vector2 a = q[i], d = q[(i + 1) % 4] - a;
+                Vector2 n = new Vector2(-d.y, d.x).normalized;
+                if (Vector2.Dot(centre - a, n) < 0f)
+                    n = -n;
+                _edgeFrom[i] = a + n * t;
+                _edgeDir[i] = d;
+            }
+            for (int i = 0; i < 4; i++)
+            {
+                int p = (i + 3) % 4;
+                float den = _edgeDir[p].x * _edgeDir[i].y - _edgeDir[p].y * _edgeDir[i].x;
+                if (Mathf.Abs(den) < 1e-4f)
+                {
+                    _inner[i] = _edgeFrom[i];
+                    continue;
+                }
+                Vector2 diff = _edgeFrom[i] - _edgeFrom[p];
+                _inner[i] = _edgeFrom[p] + _edgeDir[p] * ((diff.x * _edgeDir[i].y - diff.y * _edgeDir[i].x) / den);
+            }
+            for (int i = 0; i < 4; i++)
+            {
+                int j = (i + 1) % 4;
+                FillQuad(q[i], q[j], _inner[j], _inner[i], color);
+            }
+        }
+
+        private readonly Vector2[] _edgeFrom = new Vector2[4], _edgeDir = new Vector2[4], _inner = new Vector2[4];
+
         private void DrawRing(Vector2 c, float radius, Color color, float width = 1.5f)
         {
             int segments = radius < 20f ? 24 : 48;
@@ -1252,13 +1299,99 @@ namespace VirtualJoystick
             GUI.Label(r, text, _tooltipStyle);
         }
 
-        // Plain text, no shadow or outline, at the HUD labels' 85% opacity.
-        private const float HudTextOpacity = 0.85f;
-
-        private void DrawLabel(Rect r, string text, Color color)
+        // Like the HUD / HMCS text: HUD green, no box, through the HMCS's own additive shader (it brightens what's
+        // behind it rather than covering it). Alpha fades it.
+        private void DrawLabel(Rect line, string text, float alpha)
         {
-            _labelStyle.normal.textColor = new Color(color.r, color.g, color.b, color.a * HudTextOpacity);
-            GUI.Label(r, text, _labelStyle);
+            Color c = Theme.HudGreen;
+            c.a = Theme.OverlayTextOpacity * alpha;
+            if (DrawHmcsText(line, text, c))
+                return;
+            // HMCS shader not found: plain alpha-blended text in the same colour.
+            _labelStyle.normal.textColor = c;
+            GUI.Label(line, text, _labelStyle);
+        }
+
+        private static Material _hmcsTextMaterial;
+        private static float _nextHmcsShaderLookup;
+
+        // The game's UI/DefaultOverlay2 shader, found by name or, if Shader.Find can't see it, among the loaded ones.
+        // Looked up again every few seconds until it turns up.
+        private static Material HmcsTextMaterial
+        {
+            get
+            {
+                if (_hmcsTextMaterial != null || Time.unscaledTime < _nextHmcsShaderLookup)
+                    return _hmcsTextMaterial;
+                _nextHmcsShaderLookup = Time.unscaledTime + 2f;
+                Shader shader = Shader.Find(Theme.HmcsShaderName);
+                if (shader == null)
+                    foreach (var sh in Resources.FindObjectsOfTypeAll<Shader>())
+                        if (sh != null && sh.name == Theme.HmcsShaderName) { shader = sh; break; }
+                if (shader != null)
+                {
+                    _hmcsTextMaterial = new Material(shader) { hideFlags = HideFlags.HideAndDontSave };
+                    // The font atlas is alpha-only; like a UI Text, add white to its colour so the glyphs take the
+                    // vertex colour.
+                    _hmcsTextMaterial.SetVector("_TextureSampleAdd", new Vector4(1f, 1f, 1f, 0f));
+                }
+                return _hmcsTextMaterial;
+            }
+        }
+
+        // Glyph quads in immediate mode, straight onto the screen, centred in the line. False if the shader isn't
+        // available.
+        private bool DrawHmcsText(Rect line, string text, Color color)
+        {
+            Material mat = HmcsTextMaterial;
+            if (mat == null)
+                return false;
+            if (Event.current.type != EventType.Repaint)
+                return true;
+
+            Font font = _labelStyle.font != null ? _labelStyle.font : GUI.skin.font;
+            int size = _labelStyle.fontSize;
+            FontStyle style = _labelStyle.fontStyle;
+            font.RequestCharactersInTexture(text + "H", size, style);
+
+            float width = 0f;
+            foreach (char ch in text)
+                if (font.GetCharacterInfo(ch, out CharacterInfo ci, size, style))
+                    width += ci.advance;
+            font.GetCharacterInfo('H', out CharacterInfo cap, size, style);
+            float pen = Mathf.Round(line.center.x - width * 0.5f);
+            float baseline = Mathf.Round(line.center.y + cap.maxY * 0.5f);
+
+            mat.mainTexture = font.material.mainTexture;
+            // The shader always clips to _ClipRect (in vertex position units, here pixels), even without RectMask2D.
+            mat.SetVector("_ClipRect", new Vector4(-1e6f, -1e6f, 1e6f, 1e6f));
+            // Its alpha is also scaled by the global _HUDBrightness (the cockpit HUD brightness knob, 0.1 to 1). The
+            // overlay text stays at full brightness whatever the knob says: the material's own value overrides it.
+            mat.SetFloat("_HUDBrightness", 1f);
+            // Passed as is, not converted to linear: a UI Text's vertex colour reaches the shader unconverted too.
+            Color vc = color;
+
+            float h = Screen.height;
+            GL.PushMatrix();
+            GL.LoadPixelMatrix();
+            mat.SetPass(0);
+            GL.Begin(GL.QUADS);
+            GL.Color(vc);
+            foreach (char ch in text)
+            {
+                if (!font.GetCharacterInfo(ch, out CharacterInfo ci, size, style))
+                    continue;
+                float x0 = pen + ci.minX, x1 = pen + ci.maxX;
+                float top = h - (baseline - ci.maxY), bottom = h - (baseline - ci.minY); // GUI y down -> pixel y up
+                GL.TexCoord(ci.uvTopLeft); GL.Vertex3(x0, top, 0f);
+                GL.TexCoord(ci.uvTopRight); GL.Vertex3(x1, top, 0f);
+                GL.TexCoord(ci.uvBottomRight); GL.Vertex3(x1, bottom, 0f);
+                GL.TexCoord(ci.uvBottomLeft); GL.Vertex3(x0, bottom, 0f);
+                pen += ci.advance;
+            }
+            GL.End();
+            GL.PopMatrix();
+            return true;
         }
     }
 }
