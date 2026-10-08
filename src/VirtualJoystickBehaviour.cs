@@ -1289,6 +1289,9 @@ namespace VirtualJoystick
         {
             if (_tooltipStyle == null)
                 _tooltipStyle = new GUIStyle(GUI.skin.label) { fontSize = 12, wordWrap = false, alignment = TextAnchor.UpperLeft, padding = new RectOffset(6, 6, 4, 4) };
+            // The HUD font once it's loaded, like the overlay labels.
+            if (_tooltipStyle.font != Theme.HudFont && Theme.HudFont != null)
+                _tooltipStyle.font = Theme.HudFont;
             _tooltipStyle.normal.textColor = new Color(0.75f, 0.95f, 1f, 1f);
             Vector2 size = _tooltipStyle.CalcSize(new GUIContent(text));
             Vector2 m = Input.mousePosition;

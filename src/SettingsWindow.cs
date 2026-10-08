@@ -141,14 +141,14 @@ namespace VirtualJoystick
             BeginPanel("Keyboard");
             s.keyboardRatePitch = Slider("W/S pitch speed", s.keyboardRatePitch, 0.5f, 10f, "0.0'/s'");
             s.keyboardRateRoll = Slider("A/D roll speed", s.keyboardRateRoll, 0.5f, 10f, "0.0'/s'");
-            s.keyboardReturnRatePitch = Slider("W/S return to centre", s.keyboardReturnRatePitch, 0.1f, 20f, "0.0'/s'");
-            s.keyboardReturnRateRoll = Slider("A/D return to centre", s.keyboardReturnRateRoll, 0.1f, 20f, "0.0'/s'");
+            s.keyboardReturnRatePitch = Slider("W/S return to centre", s.keyboardReturnRatePitch, 0.5f, 10f, "0.0'/s'");
+            s.keyboardReturnRateRoll = Slider("A/D return to centre", s.keyboardReturnRateRoll, 0.5f, 10f, "0.0'/s'");
             s.rudderRate = Slider("Rudder (Q/E) speed", s.rudderRate, 0.5f, 10f, "0.0'/s'");
             EndPanel();
 
             BeginPanel("SOI cursor");
-            s.tgpSensitivity = Slider("TGP sensitivity", s.tgpSensitivity, 0.1f, 5f, "0.00'x'");
-            s.cursorSensitivity = Slider("Radar/map/ARAD cursor", s.cursorSensitivity, 0.1f, 5f, "0.00'x'");
+            s.tgpSensitivity = Slider("TGP sensitivity", s.tgpSensitivity, 0.1f, 2f, "0.00'x'");
+            s.cursorSensitivity = Slider("Radar/map/ARAD cursor", s.cursorSensitivity, 0.1f, 2f, "0.00'x'");
             EndPanel();
 
             BeginPanel("Overlay");
@@ -234,9 +234,9 @@ namespace VirtualJoystick
             string text = capturing ? "Press a key…" : KeyDisplayName(current);
             Color saved = GUI.contentColor;
             if (capturing)
-                GUI.contentColor = Theme.Accent;
+                GUI.contentColor = Theme.Menu.Accent;
             else if (clashes.Count > 0)
-                GUI.contentColor = Theme.Warning;
+                GUI.contentColor = Theme.Menu.Warning;
             if (GUILayout.Button(text, Theme.KeyButton, GUILayout.ExpandWidth(true)))
                 _rebinding = capturing ? null : b;
             GUI.contentColor = saved;
@@ -355,12 +355,18 @@ namespace VirtualJoystick
             System.Func<VirtualJoystickSettings, string> getOn, System.Action<VirtualJoystickSettings, string> setOn,
             System.Func<VirtualJoystickSettings, string> getOff, System.Action<VirtualJoystickSettings, string> setOff,
             System.Func<VirtualJoystickSettings, string> getToggle, System.Action<VirtualJoystickSettings, string> setToggle) =>
-            new BindCard { Title = title, Locate = At(c), Available = () => c.Found, Binds = new[]
+            new BindCard
+            {
+                Title = title,
+                Locate = At(c),
+                Available = () => c.Found,
+                Binds = new[]
             {
                 B("On", getOn, setOn),
                 B("Off", getOff, setOff),
                 B("Toggle", getToggle, setToggle),
-            } };
+            }
+            };
 
 
         private static readonly BindSection[] Sections =
@@ -625,7 +631,7 @@ namespace VirtualJoystick
             string header = card.Title + (bound > 0 ? $"   ({bound} bound)" : "") + (missing ? "   (not in this aircraft)" : "");
             Color savedColor = GUI.contentColor;
             if (clash)
-                GUI.contentColor = Theme.Warning; // one of its keys is also bound elsewhere
+                GUI.contentColor = Theme.Menu.Warning; // one of its keys is also bound elsewhere
             bool clicked = GUILayout.Button(header, open ? Theme.CardHeaderOpen : CardHeader());
             GUI.contentColor = savedColor;
             if (clicked)
@@ -683,10 +689,10 @@ namespace VirtualJoystick
                 return;
 
             var s = VirtualJoystickSettings.Current;
-            Fill(g, new Color(0f, 0f, 0f, 0.35f));
+            Fill(g, Theme.Menu.GraphBg);
 
             // Quarter grid.
-            Color grid = new Color(1f, 1f, 1f, 0.08f);
+            Color grid = Theme.Menu.GraphGrid;
             for (int i = 1; i < 4; i++)
             {
                 Fill(new Rect(g.x + g.width * i / 4f, g.y, 1f, g.height), grid);
@@ -696,11 +702,11 @@ namespace VirtualJoystick
             // Deadzone band.
             float dzW = s.deadzone * g.width;
             if (dzW >= 1f)
-                Fill(new Rect(g.x, g.y, dzW, g.height), new Color(1f, 0.85f, 0.3f, 0.15f));
+                Fill(new Rect(g.x, g.y, dzW, g.height), Theme.Menu.GraphDeadzone);
 
             // Linear reference diagonal, then the actual response, drawn column by column.
-            Color linear = new Color(1f, 1f, 1f, 0.25f);
-            Color curve = new Color(0.55f, 1f, 0.6f, 1f);
+            Color linear = Theme.Menu.GraphLinear;
+            Color curve = Theme.Menu.GraphCurve;
             float prevLin = g.yMax, prevOut = g.yMax;
             int cols = Mathf.RoundToInt(g.width);
             for (int i = 0; i <= cols; i++)
@@ -715,7 +721,7 @@ namespace VirtualJoystick
                 prevOut = yOut;
             }
 
-            Outline(g, new Color(1f, 1f, 1f, 0.35f));
+            Outline(g, Theme.Menu.GraphOutline);
         }
 
         // Vertical bar joining two consecutive samples, so steep parts of the curve stay continuous.
@@ -763,15 +769,16 @@ namespace VirtualJoystick
         // Checkbox: grey border on dark when off, bright blue when on. Drawn by hand so it looks exactly like that.
         private static bool Toggle(string label, bool value)
         {
-            const float box = 16f;
+            // The box is as tall as the text's capitals, centred on the text line.
+            float box = Theme.CheckSize;
             Rect row = GUILayoutUtility.GetRect(new GUIContent(label), Theme.Label, GUILayout.ExpandWidth(true), GUILayout.MinHeight(box + 8f));
             bool hover = row.Contains(Event.current.mousePosition);
-            var boxRect = new Rect(row.x + 2f, row.y + (row.height - box) * 0.5f, box, box);
+            var boxRect = new Rect(row.x + 2f, Mathf.Round(row.y + (row.height - box) * 0.5f), box, box);
             if (Event.current.type == EventType.Repaint)
             {
                 Texture2D tex = value ? (hover ? Theme.CheckOnHover : Theme.CheckOn) : (hover ? Theme.CheckOffHover : Theme.CheckOff);
                 GUI.DrawTexture(boxRect, tex);
-                Theme.Label.Draw(new Rect(boxRect.xMax + 8f, row.y, row.width - box - 10f, row.height), label, hover, false, false, false);
+                Theme.Label.Draw(new Rect(boxRect.xMax + 6f, row.y, row.width - box - 8f, row.height), label, hover, false, false, false);
             }
             bool v = value;
             if (Event.current.type == EventType.MouseDown && Event.current.button == 0 && hover)

@@ -197,7 +197,7 @@ namespace VirtualJoystick
         public bool recenterOnEnable = true;
 
         // Keys that should also switch the mode off (so FlatScreen 3's menus get a free cursor).
-        public string[] releaseKeys = { "Escape", "F9" };
+        public string[] releaseKeys = { "Escape" };
 
         // Side length of the square control area, in screen pixels.
         public float overlaySize = 460f;
