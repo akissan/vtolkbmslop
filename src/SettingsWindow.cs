@@ -142,6 +142,7 @@ namespace VirtualJoystick
                     VirtualJoystickSettings.ResetToDefaults();
                     _rebinding = null;
                     KeysChanged = true;
+                    InvalidateClashes();
                 }
             }
             else if (GUILayout.Button("RESET KEY BINDINGS TO DEFAULTS", Theme.Flush))
@@ -149,6 +150,7 @@ namespace VirtualJoystick
                 VirtualJoystickSettings.ResetKeysToDefaults();
                 _rebinding = null;
                 KeysChanged = true;
+                InvalidateClashes();
             }
             GUILayout.Space(TabGap);
             if (GUILayout.Button("CLOSE", Theme.Flush))
@@ -259,7 +261,7 @@ namespace VirtualJoystick
         private static void KeyRow(Bind b, float labelWidth = KeyLabelWidth)
         {
             string current = b.Get(VirtualJoystickSettings.Current);
-            var clashes = Clashes(b, current);
+            string clashes = Clashes(b);
             string hint = null;
             if (b.Hint != null)
             {
@@ -278,8 +280,8 @@ namespace VirtualJoystick
             // Drawn in a keycap instead of by the button: a bound key's name in capitals, an empty cap with a cross, or
             // while waiting for a key, PRESS A KEY with cycling dots.
             bool bound = !string.IsNullOrEmpty(current) && current != "None";
-            GUIStyle keyStyle = !capturing && clashes.Count > 0 ? Theme.KeyButtonClash : Theme.KeyButton;
-            GUIStyle drawStyle = !capturing && clashes.Count > 0 ? Theme.KeyButtonClashCapped : Theme.KeyButtonCapped;
+            GUIStyle keyStyle = !capturing && clashes != null ? Theme.KeyButtonClash : Theme.KeyButton;
+            GUIStyle drawStyle = !capturing && clashes != null ? Theme.KeyButtonClashCapped : Theme.KeyButtonCapped;
             // The button's own text is invisible and only gives it its one-line height.
             if (GUILayout.Button("KEY", drawStyle, GUILayout.ExpandWidth(true)))
                 _rebinding = capturing ? null : b;
@@ -296,8 +298,8 @@ namespace VirtualJoystick
                     Keycap(button, bound ? KeyDisplayName(current).ToUpperInvariant() : null, keyStyle);
             }
             GUILayout.EndHorizontal();
-            if (clashes.Count > 0 && !capturing)
-                GUILayout.Label("Also used by: " + string.Join(", ", clashes), Theme.WarningText);
+            if (clashes != null && !capturing)
+                GUILayout.Label("Also used by: " + clashes, Theme.WarningText);
         }
 
         // A bound key's name in a rounded 1 px frame like a keycap, in the colour the button's text would have (green,
@@ -429,26 +431,84 @@ namespace VirtualJoystick
             return r;
         }
 
-        // Every other binding in the Bindings tab using this key, as "SECTION › Card › Action".
-        private static System.Collections.Generic.List<string> Clashes(Bind self, string key)
+        // Key clashes, worked out once per frame (the window asks for them for every card and row, on every GUI event):
+        // each bound key -> the bindings using it, and for each binding whose key is also used elsewhere, the others
+        // as "SECTION › Card › Action, ...".
+        private static readonly System.Collections.Generic.Dictionary<string, System.Collections.Generic.List<Bind>> KeyUsers =
+            new System.Collections.Generic.Dictionary<string, System.Collections.Generic.List<Bind>>();
+        private static readonly System.Collections.Generic.Dictionary<Bind, string> ClashText = new System.Collections.Generic.Dictionary<Bind, string>();
+        private static int _clashFrame = -1;
+
+        // A binding changed: rebuild the clash map on its next use, even within this frame.
+        private static void InvalidateClashes() => _clashFrame = -1;
+
+        private static void EnsureClashes()
         {
-            var result = new System.Collections.Generic.List<string>();
-            if (string.IsNullOrEmpty(key) || key == "None")
-                return result;
+            if (_clashFrame == Time.frameCount)
+                return;
+            _clashFrame = Time.frameCount;
+            foreach (var users in KeyUsers.Values)
+                users.Clear();
+            ClashText.Clear();
+
             var s = VirtualJoystickSettings.Current;
             foreach (var section in Sections)
                 foreach (var card in section.Cards)
                     foreach (var b in card.Binds)
-                        if (b != self && b.Get(s) == key)
-                            result.Add($"{section.Title} › {card.Title} › {b.Label}");
-            return result;
+                    {
+                        string key = b.Get(s);
+                        if (string.IsNullOrEmpty(key) || key == "None")
+                            continue;
+                        if (!KeyUsers.TryGetValue(key, out var users))
+                            KeyUsers[key] = users = new System.Collections.Generic.List<Bind>();
+                        users.Add(b);
+                    }
+
+            foreach (var users in KeyUsers.Values)
+            {
+                if (users.Count < 2)
+                    continue;
+                foreach (var b in users)
+                {
+                    if (ClashText.ContainsKey(b))
+                        continue;
+                    var others = new System.Text.StringBuilder();
+                    foreach (var o in users)
+                    {
+                        if (o == b)
+                            continue;
+                        if (others.Length > 0)
+                            others.Append(", ");
+                        others.Append(PathOf(o));
+                    }
+                    if (others.Length > 0)
+                        ClashText[b] = others.ToString();
+                }
+            }
+        }
+
+        // "SECTION › Card › Action" for a binding (only built for clashing ones).
+        private static string PathOf(Bind b)
+        {
+            foreach (var section in Sections)
+                foreach (var card in section.Cards)
+                    if (System.Array.IndexOf(card.Binds, b) >= 0)
+                        return $"{section.Title} › {card.Title} › {b.Label}";
+            return b.Label;
+        }
+
+        // Every other binding in the Bindings tab using this binding's key, comma separated; null if none.
+        private static string Clashes(Bind b)
+        {
+            EnsureClashes();
+            return ClashText.TryGetValue(b, out string text) ? text : null;
         }
 
         private static bool CardHasClash(BindCard card)
         {
-            var s = VirtualJoystickSettings.Current;
+            EnsureClashes();
             foreach (var b in card.Binds)
-                if (Clashes(b, b.Get(s)).Count > 0)
+                if (ClashText.ContainsKey(b))
                     return true;
             return false;
         }
@@ -506,6 +566,7 @@ namespace VirtualJoystick
             _rebinding.Set(VirtualJoystickSettings.Current, key);
             _rebinding = null;
             KeysChanged = true;
+            InvalidateClashes();
         }
 
         // ------------------------------------------------------------------ bindings tab

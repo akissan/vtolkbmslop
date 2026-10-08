@@ -1343,11 +1343,21 @@ namespace VirtualJoystick
         // Solid quad between four GUI points (y down), any shape: the screen outline is a perspective quad.
         private void FillQuad(Vector2 a, Vector2 b, Vector2 c, Vector2 d, Color color)
         {
+            if (!BeginQuads(color))
+                return;
+            Quad(a, b, c, d);
+            EndQuads();
+        }
+
+        // A batch of solid quads in one colour: one draw call for the lot (rings, frames), not one per quad.
+        // False (nothing to end) if the shader isn't available.
+        private bool BeginQuads(Color color)
+        {
             if (_quadMaterial == null)
             {
                 Shader shader = Shader.Find("Hidden/Internal-Colored");
                 if (shader == null)
-                    return;
+                    return false;
                 _quadMaterial = new Material(shader) { hideFlags = HideFlags.HideAndDontSave };
                 _quadMaterial.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
                 _quadMaterial.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
@@ -1355,16 +1365,28 @@ namespace VirtualJoystick
                 _quadMaterial.SetInt("_ZWrite", 0);
                 _quadMaterial.SetInt("_ZTest", (int)UnityEngine.Rendering.CompareFunction.Always);
             }
-            float h = Screen.height;
+            _quadScreenH = Screen.height;
             GL.PushMatrix();
             GL.LoadPixelMatrix();
             _quadMaterial.SetPass(0);
             GL.Begin(GL.QUADS);
             GL.Color(color);
+            return true;
+        }
+
+        private float _quadScreenH;
+
+        private void Quad(Vector2 a, Vector2 b, Vector2 c, Vector2 d)
+        {
+            float h = _quadScreenH;
             GL.Vertex3(a.x, h - a.y, 0f);
             GL.Vertex3(b.x, h - b.y, 0f);
             GL.Vertex3(c.x, h - c.y, 0f);
             GL.Vertex3(d.x, h - d.y, 0f);
+        }
+
+        private static void EndQuads()
+        {
             GL.End();
             GL.PopMatrix();
         }
@@ -1407,11 +1429,14 @@ namespace VirtualJoystick
                 Vector2 diff = _edgeFrom[i] - _edgeFrom[p];
                 _inner[i] = _edgeFrom[p] + _edgeDir[p] * ((diff.x * _edgeDir[i].y - diff.y * _edgeDir[i].x) / den);
             }
+            if (!BeginQuads(color))
+                return;
             for (int i = 0; i < 4; i++)
             {
                 int j = (i + 1) % 4;
-                FillQuad(q[i], q[j], _inner[j], _inner[i], color);
+                Quad(q[i], q[j], _inner[j], _inner[i]);
             }
+            EndQuads();
         }
 
         private readonly Vector2[] _edgeFrom = new Vector2[4], _edgeDir = new Vector2[4], _inner = new Vector2[4];
@@ -1425,14 +1450,17 @@ namespace VirtualJoystick
         {
             const int segments = 48;
             float rIn = radius - width * 0.5f, rOut = radius + width * 0.5f;
+            if (!BeginQuads(color))
+                return;
             Vector2 dirPrev = new Vector2(1f, 0f);
             for (int i = 1; i <= segments; i++)
             {
                 float ang = i * Mathf.PI * 2f / segments;
                 var dir = new Vector2(Mathf.Cos(ang), Mathf.Sin(ang));
-                FillQuad(c + dirPrev * rIn, c + dirPrev * rOut, c + dir * rOut, c + dir * rIn, color);
+                Quad(c + dirPrev * rIn, c + dirPrev * rOut, c + dir * rOut, c + dir * rIn);
                 dirPrev = dir;
             }
+            EndQuads();
         }
 
         // Circle of rotated line segments: the circular travel limit.

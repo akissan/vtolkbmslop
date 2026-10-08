@@ -342,6 +342,13 @@ namespace VirtualJoystick
             public VRIHoverToggle HoverToggle;
             public MFDPortalPageSelectButton PageButton;
 
+            // The pooled hover frame's box, read once: VRIHoverToggle sets it in Awake and never changes it.
+            // HoverPooled = read (Awake has run under a master); HoverParent null then = unusable (rotated or empty).
+            public bool HoverPooled;
+            public Transform HoverParent;
+            public Rect HoverRect;
+            public float HoverZ;
+
             // Cached drawn hitbox, in Plane's local space (so it follows the element if the page moves).
             public bool Cached;
             public string Kind;          // "panel", "text", "icon", or null (nothing drawn: fall back to rect/bounds/sphere)
@@ -661,21 +668,16 @@ namespace VirtualJoystick
             rect = default;
             z = 0f;
             var toggle = vis.HoverToggle;
-            if (toggle != null && HoverParentField?.GetValue(toggle) is Transform parent && parent != null)
+            if (toggle != null && !vis.HoverPooled && HoverParentField?.GetValue(toggle) is Transform hParent && hParent != null)
+                ReadPooledHoverFrame(vis, toggle, hParent);
+            if (vis.HoverPooled)
             {
-                // Pooled: rebuild the frame in its parent's space (the pool template's pivot, no rotation).
-                var master = toggle.GetComponentInParent<VRHoverToggleMaster>();
-                if (!(HoverRotField.GetValue(toggle) is Quaternion rot) || Quaternion.Angle(rot, Quaternion.identity) > 1f)
-                    return false;
-                Vector3 pos = (Vector3)HoverPosField.GetValue(toggle), scale = (Vector3)HoverScaleField.GetValue(toggle);
-                float w = (float)HoverWidthField.GetValue(toggle) * scale.x, h = (float)HoverHeightField.GetValue(toggle) * scale.y;
-                Vector2 pivot = master != null && master.hoverObjTemplate != null && master.hoverObjTemplate.transform is RectTransform tmpl
-                    ? tmpl.pivot : new Vector2(0.5f, 0.5f);
-                if (w <= 1e-4f || h <= 1e-4f)
-                    return false;
+                Transform parent = vis.HoverParent;
+                if (parent == null)
+                    return false; // rotated or empty frame, or its parent has been destroyed
                 plane = parent;
-                rect = new Rect(pos.x - pivot.x * w, pos.y - pivot.y * h, w, h);
-                z = pos.z;
+                rect = vis.HoverRect;
+                z = vis.HoverZ;
                 return parent.gameObject.activeInHierarchy;
             }
             GameObject frame = toggle != null ? toggle.hoverObj : vis.PageButton != null ? vis.PageButton.hoverObj : null;
@@ -684,6 +686,25 @@ namespace VirtualJoystick
             plane = rt;
             rect = rt.rect;
             return true;
+        }
+
+        // Pooled: the frame rebuilt in its parent's space (the pool template's pivot, no rotation).
+        private static void ReadPooledHoverFrame(ElementVisuals vis, VRIHoverToggle toggle, Transform parent)
+        {
+            vis.HoverPooled = true;
+            vis.HoverParent = null;
+            if (!(HoverRotField.GetValue(toggle) is Quaternion rot) || Quaternion.Angle(rot, Quaternion.identity) > 1f)
+                return;
+            var master = toggle.GetComponentInParent<VRHoverToggleMaster>(true);
+            Vector3 pos = (Vector3)HoverPosField.GetValue(toggle), scale = (Vector3)HoverScaleField.GetValue(toggle);
+            float w = (float)HoverWidthField.GetValue(toggle) * scale.x, h = (float)HoverHeightField.GetValue(toggle) * scale.y;
+            Vector2 pivot = master != null && master.hoverObjTemplate != null && master.hoverObjTemplate.transform is RectTransform tmpl
+                ? tmpl.pivot : new Vector2(0.5f, 0.5f);
+            if (w <= 1e-4f || h <= 1e-4f)
+                return;
+            vis.HoverParent = parent;
+            vis.HoverRect = new Rect(pos.x - pivot.x * w, pos.y - pivot.y * h, w, h);
+            vis.HoverZ = pos.z;
         }
 
         // Hitbox = what you see, as close to the label as possible, so neighbouring buttons don't overlap.
