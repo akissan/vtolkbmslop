@@ -2,9 +2,12 @@ using UnityEngine;
 
 namespace VirtualJoystick
 {
-    // Look of the settings window, after a dark cockpit MFD: near-black base with a slight purple cast, borderless
-    // purple-grey panels with hard corners and padding (stepped shades instead of outlines), light grey-green text,
-    // a muted blue-green accent and the aircraft HUD's font (VeraMono).
+    // Look of the settings window, after a dark cockpit MFD: four opaque colours and nothing else. A dark purple-grey
+    // background, bright green for all text, lines and fills, white for whatever is under the cursor and yellow for
+    // clashing key bindings. No panels or button backgrounds: buttons, tabs and cards are framed by a 1 px border (a
+    // selected tab filled), sections only marked at their corners, and a key binding waiting for a key is
+    // filled, its text in the background colour.
+    // The aircraft HUD's font (VeraMono).
     // Built from scratch, and once more when the HUD font turns up.
     internal static class Theme
     {
@@ -12,36 +15,10 @@ namespace VirtualJoystick
         // hovers use HudGreen below, so the menu can be recoloured without touching them.
         public static class Menu
         {
-            public static readonly Color Main = Hex(0x1B1B21, 0.95f);         // window background
-            public static readonly Color Section = Hex(0x26252D, 0.85f);      // section / group panels
-            public static readonly Color Control = Hex(0x31313A, 0.95f);      // buttons, card headers and bodies
-            public static readonly Color ControlHover = Hex(0x3A3A45, 0.97f);
-            public static readonly Color ControlActive = Hex(0x44434F, 1f);
-            public static readonly Color KeyBg = Hex(0x141318, 0.95f);        // key binding buttons
-            public static readonly Color KeyHover = Hex(0x1D1C23, 0.97f);
-            public static readonly Color Text = Hex(0xCCDACB, 1f);            // grey with a little green
-            public static readonly Color TextHover = Color.white;             // button text when hovered / pressed
-            public static readonly Color Muted = Hex(0x8A9989, 1f);           // small text and hints
-            public static readonly Color Accent = Hex(0x6BB88A, 1f);          // selected tab, slider thumb, checked box
-            public static readonly Color AccentHover = Color.Lerp(Accent, Color.white, 0.15f);
-            public static readonly Color OnAccentText = Color.white;          // text on the accent (selected tab)
-            public static readonly Color CheckOffFill = Hex(0x141318, 1f);
-            public static readonly Color CheckBorder = Hex(0x6A786B, 1f);
-            public static readonly Color CheckOffHoverBorder = Color.Lerp(CheckBorder, Accent, 0.6f);
-            public static readonly Color CheckOnBorder = Color.Lerp(Accent, Color.white, 0.3f);
-            public static readonly Color CheckOnHoverFill = Color.Lerp(Accent, Color.white, 0.15f);
-            public static readonly Color CheckOnHoverBorder = Color.Lerp(Accent, Color.white, 0.45f);
-            public static readonly Color Warning = Hex(0xF2C14E, 1f);         // clashing key bindings
-            public static readonly Color ScrollTrack = Hex(0x141318, 0.7f);
-            public static readonly Color ScrollThumb = Hex(0x4B4956, 1f);
-
-            // Response curve graph (Stick tab).
-            public static readonly Color GraphBg = new Color(0f, 0f, 0f, 0.35f);
-            public static readonly Color GraphGrid = new Color(1f, 1f, 1f, 0.08f);
-            public static readonly Color GraphDeadzone = new Color(1f, 0.85f, 0.3f, 0.15f);
-            public static readonly Color GraphLinear = new Color(1f, 1f, 1f, 0.25f);
-            public static readonly Color GraphCurve = Accent;
-            public static readonly Color GraphOutline = new Color(1f, 1f, 1f, 0.35f);
+            public static readonly Color Main = Hex(0x17161B, 1f);   // window background (grey, a little purple); also text on a fill
+            public static readonly Color Text = Hex(0x74F27E, 1f);   // bright green: text, lines, fills
+            public static readonly Color Hover = Color.white;        // hovered / pressed elements
+            public static readonly Color Clash = Hex(0xFFE14D, 1f);  // bright yellow: keys also bound elsewhere, and their cards
         }
 
         // The green of the aircraft HUD and helmet symbology (the game's most used UI green): the overlay title and
@@ -88,12 +65,15 @@ namespace VirtualJoystick
         // one gap wide, with one gap on each side of it (to the content, and the window edge).
         public const int Gap = 6;
 
+        // Padding on every side of every button (tabs, key bindings and card headers too): square, like the keys.
+        public const int ButtonPad = 13;
+
         // Width the scrollbar column takes (gap + bar): the tab bar and bottom row leave the same space on the right.
         public const float ScrollbarSpace = Gap * 2;
 
         private static GUISkin _skin;
         public static GUIStyle Window, Label, Bold, Small, Hint, SectionTitle, Button, CardHeader, CardHeaderOpen, CardBody,
-            Tab, Panel, Slider, SliderThumb, KeyButton, Flush, LabelWrap, WarningText;
+            CardOpen, CardHeaderClash, CardHeaderOpenClash, CardOpenClash, KeyButtonClash, Tab, Panel, Slider, SliderThumb, KeyButton, KeyButtonCapture, Flush, LabelWrap, WarningText, Footer, SliderValue;
         public static Texture2D CheckOff, CheckOffHover, CheckOn, CheckOnHover;
 
         // Checkbox side: the height of a capital letter of Label.
@@ -124,13 +104,15 @@ namespace VirtualJoystick
             // the letters run into each other. Bold only for the fallback font.
             FontStyle heavy = _builtWithHudFont ? FontStyle.Normal : FontStyle.Bold;
 
-            Texture2D control = Solid(Menu.Control), controlHover = Solid(Menu.ControlHover), controlActive = Solid(Menu.ControlActive);
-            Texture2D accent = Solid(Menu.Accent), accentHover = Solid(Menu.AccentHover);
+            // IMGUI only uses a style's hover / active / on states when they have a background, so the text-only buttons
+            // get one in the window's own colour to make their text colours apply.
+            Texture2D none = Solid(Menu.Main);
+            Texture2D fill = Solid(Menu.Text), fillHover = Solid(Menu.Hover);
 
             Window = new GUIStyle
             {
                 font = font, fontSize = FontSize + 1, fontStyle = heavy,
-                alignment = TextAnchor.UpperCenter,
+                alignment = TextAnchor.UpperLeft, // title on the left, over the tabs' left edge
                 padding = new RectOffset(Gap, Gap, 32, Gap),
                 contentOffset = new Vector2(0f, -24f),
             };
@@ -139,75 +121,120 @@ namespace VirtualJoystick
             Window.onNormal.background = Window.normal.background;
             Window.onNormal.textColor = Menu.Text;
 
-            Label = new GUIStyle { font = font, fontSize = FontSize, wordWrap = false, padding = new RectOffset(2, 2, 3, 3), margin = new RectOffset(0, 0, 0, 0) };
+            Label = new GUIStyle { font = font, fontSize = FontSize, wordWrap = false, padding = new RectOffset(4, 4, 4, 4), margin = new RectOffset(0, 0, 0, 0) };
             Label.normal.textColor = Menu.Text;
 
             // Wrapping text that grows downwards instead of clipping; padded so it never touches its container's edges.
-            LabelWrap = new GUIStyle(Label) { wordWrap = true, padding = new RectOffset(4, 6, 3, 3) };
-            WarningText = new GUIStyle(Label) { fontSize = FontSize - 2, wordWrap = true, padding = new RectOffset(6, 6, 0, 6) };
-            WarningText.normal.textColor = Menu.Warning;
+            LabelWrap = new GUIStyle(Label) { wordWrap = true, padding = new RectOffset(4, 7, 4, 4) };
+            WarningText = new GUIStyle(Label) { fontSize = FontSize - 2, wordWrap = true, padding = new RectOffset(7, 7, 1, 7) };
+            WarningText.normal.textColor = Menu.Clash;
 
             Bold = new GUIStyle(Label) { fontStyle = heavy };
             Small = new GUIStyle(Label) { fontSize = FontSize - 2, wordWrap = true };
-            Small.normal.textColor = Menu.Muted;
-            Hint = new GUIStyle(Label) { fontSize = FontSize - 3, wordWrap = true, padding = new RectOffset(8, 6, 0, 4) };
-            Hint.normal.textColor = Menu.Muted;
-            SectionTitle = new GUIStyle(Label) { fontStyle = heavy, fontSize = FontSize + 1, padding = new RectOffset(2, 2, 0, Gap) };
+            Small.normal.textColor = Menu.Text;
+            // The hint line at the bottom of the window: as far from the buttons above as from the window's left and
+            // bottom edges (which add the window's own Gap).
+            Footer = new GUIStyle(Small) { padding = new RectOffset(Gap * 2, Gap * 2, Gap * 3, Gap * 2) };
+            SliderValue = new GUIStyle(Label) { alignment = TextAnchor.UpperRight };
+            Hint = new GUIStyle(Label) { fontSize = FontSize - 3, wordWrap = true, padding = new RectOffset(9, 7, 1, 5) };
+            Hint.normal.textColor = Menu.Text;
+            SectionTitle = new GUIStyle(Label) { fontStyle = heavy, fontSize = FontSize + 1, padding = new RectOffset(3, 3, 1, Gap + 1), margin = new RectOffset(0, 0, Gap, Gap) };
             SectionTitle.normal.textColor = Menu.Text;
 
+            // Buttons (tabs and key bindings too): framed by a 1 px border like the cards, white with the text on hover.
+            Texture2D buttonFrame = Frame(Menu.Text, 1), buttonFrameHover = Frame(Menu.Hover, 1);
             Button = new GUIStyle
             {
                 font = font, fontSize = FontSize, alignment = TextAnchor.MiddleCenter,
-                padding = new RectOffset(10, 10, 6, 6), margin = new RectOffset(0, 0, 0, Gap),
+                padding = new RectOffset(ButtonPad, ButtonPad, ButtonPad, ButtonPad), margin = new RectOffset(0, 0, 0, Gap + 1),
+                border = new RectOffset(1, 1, 1, 1),
             };
-            Button.normal.background = control;
+            Button.normal.background = buttonFrame;
             Button.normal.textColor = Menu.Text;
-            Button.hover.background = controlHover;
-            Button.hover.textColor = Menu.TextHover;
-            Button.active.background = controlActive;
-            Button.active.textColor = Menu.TextHover;
+            Button.hover.background = buttonFrameHover;
+            Button.hover.textColor = Menu.Hover;
+            Button.active.background = buttonFrameHover;
+            Button.active.textColor = Menu.Hover;
 
-            // Key binding buttons: just a darker background.
-            KeyButton = new GUIStyle(Button) { margin = new RectOffset(Gap, 0, Gap / 2, Gap / 2) };
-            KeyButton.normal.background = Solid(Menu.KeyBg);
-            KeyButton.hover.background = Solid(Menu.KeyHover);
-            KeyButton.active.background = Solid(Menu.KeyHover);
+            // Key binding buttons: just text, framed only on hover; yellow text when the key is also bound elsewhere
+            // (KeyButtonClash); while waiting for a key, filled (KeyButtonCapture).
+            KeyButton = new GUIStyle(Button) { margin = new RectOffset(Gap + 1, 0, Gap, Gap) };
+            KeyButton.normal.background = null;
+            KeyButtonClash = new GUIStyle(KeyButton);
+            KeyButtonClash.normal.textColor = Menu.Clash;
+            KeyButtonCapture = new GUIStyle(KeyButton);
+            KeyButtonCapture.normal.background = fill;
+            KeyButtonCapture.normal.textColor = Menu.Main;
+            KeyButtonCapture.hover.background = fillHover;
+            KeyButtonCapture.hover.textColor = Menu.Main;
+            KeyButtonCapture.active.background = fillHover;
+            KeyButtonCapture.active.textColor = Menu.Main;
 
-            // Cards: a header button; when open, the body continues directly below it in the same shade (no gap).
-            CardHeader = new GUIStyle(Button) { alignment = TextAnchor.MiddleLeft, padding = new RectOffset(10, 10, 7, 7), wordWrap = true };
-            CardHeaderOpen = new GUIStyle(CardHeader) { margin = new RectOffset(0, 0, 0, 0) };
-            CardBody = new GUIStyle { padding = new RectOffset(10, 10, Gap, Gap), margin = new RectOffset(0, 0, 0, Gap) };
-            CardBody.normal.background = control;
+            // Cards: a header button framed by a 1 px border (white on hover). When open, the frame moves out to hold
+            // header and body together (CardOpen) and the header itself is unframed. A card with a clashing key has a
+            // yellow frame and header text (the ...Clash styles).
+            Texture2D cardFrame = Frame(Menu.Text, 1), cardFrameHover = Frame(Menu.Hover, 1), cardFrameClash = Frame(Menu.Clash, 1);
+            CardHeader = new GUIStyle(Button)
+            {
+                alignment = TextAnchor.MiddleLeft, padding = new RectOffset(ButtonPad, ButtonPad, ButtonPad, ButtonPad), wordWrap = true,
+                border = new RectOffset(1, 1, 1, 1),
+            };
+            CardHeader.normal.background = cardFrame;
+            CardHeader.hover.background = cardFrameHover;
+            CardHeader.active.background = cardFrameHover;
+            CardHeaderClash = new GUIStyle(CardHeader);
+            CardHeaderClash.normal.background = cardFrameClash;
+            CardHeaderClash.normal.textColor = Menu.Clash;
+            // Inside the open frame's 1 px, so one less padding keeps the text where it was when closed.
+            CardHeaderOpen = new GUIStyle(CardHeader) { padding = new RectOffset(ButtonPad - 1, ButtonPad - 1, ButtonPad - 1, ButtonPad - 1), margin = new RectOffset(0, 0, 0, 0) };
+            CardHeaderOpen.normal.background = null;
+            CardHeaderOpen.hover.background = none;
+            CardHeaderOpen.active.background = none;
+            CardHeaderOpenClash = new GUIStyle(CardHeaderOpen);
+            CardHeaderOpenClash.normal.textColor = Menu.Clash;
+            // Left padding plus the labels' own 4 px lines the key names up with the header text (1 + 12 px in the frame).
+            CardBody = new GUIStyle { padding = new RectOffset(8, 12, 0, Gap) };
+            // Padded by the frame's 1 px so the header's hover background can't paint over it.
+            CardOpen = new GUIStyle { border = new RectOffset(1, 1, 1, 1), padding = new RectOffset(1, 1, 1, 1), margin = new RectOffset(0, 0, 0, Gap + 1) };
+            CardOpen.normal.background = cardFrame;
+            CardOpenClash = new GUIStyle(CardOpen);
+            CardOpenClash.normal.background = cardFrameClash;
 
             // Tabs and full-width row buttons have no side margins; the window puts explicit gaps between them.
+            // Tabs: the selected one filled, its text in the background colour.
             Flush = new GUIStyle(Button) { margin = new RectOffset(0, 0, 0, 0) };
-            Tab = new GUIStyle(Button) { fontStyle = heavy, padding = new RectOffset(10, 10, 7, 7), margin = new RectOffset(0, 0, 0, 0) };
-            Tab.onNormal.background = accent;
-            Tab.onNormal.textColor = Menu.OnAccentText;
-            Tab.onHover.background = accentHover;
-            Tab.onHover.textColor = Menu.OnAccentText;
-            Tab.onActive.background = accent;
-            Tab.onActive.textColor = Menu.OnAccentText;
+            Tab = new GUIStyle(Button) { fontStyle = heavy, margin = new RectOffset(0, 0, 0, 0) };
+            Tab.onNormal.background = fill;
+            Tab.onNormal.textColor = Menu.Main;
+            Tab.onHover.background = fillHover;
+            Tab.onHover.textColor = Menu.Main;
+            Tab.onActive.background = fillHover;
+            Tab.onActive.textColor = Menu.Main;
 
-            // No side margins: panels span exactly the width of the tab bar and the bottom row.
-            Panel = new GUIStyle { padding = new RectOffset(10, 10, 10, 10), margin = new RectOffset(0, 0, 0, Gap) };
-            Panel.normal.background = Solid(Menu.Section);
+            // Sections: no full border, just small 1 px corner marks, with the content padded clear of them. No side
+            // margins, so they span the width of the tab bar and the bottom row.
+            Panel = new GUIStyle
+            {
+                padding = new RectOffset(Gap + 1, Gap + 1, Gap + 1, Gap + 1), margin = new RectOffset(0, 0, 0, Gap * 2),
+                border = new RectOffset(CornerArm, CornerArm, CornerArm, CornerArm),
+            };
+            Panel.normal.background = Corners(Menu.Text);
 
-            // A 1 px line in the text colour through the middle of the slider, accent handle its full height. The slider
+            // A 1 px line through the middle of the slider, the handle its full height. The slider
             // itself is the handle's height (not the line's) so the whole handle takes clicks instead of dragging the window.
             Slider = new GUIStyle { fixedHeight = SliderHeight, margin = new RectOffset(4, 4, 4, 5) };
             Slider.normal.background = HorizontalLine(SliderHeight, Menu.Text);
             SliderThumb = new GUIStyle { fixedWidth = 6f, fixedHeight = SliderHeight };
-            SliderThumb.normal.background = accent;
-            SliderThumb.hover.background = accentHover;
-            SliderThumb.active.background = accentHover;
+            SliderThumb.normal.background = fill;
+            SliderThumb.hover.background = fillHover;
+            SliderThumb.active.background = fillHover;
 
-            // Checkboxes as tall as a capital letter, with a slight 1 px border (drawn 1:1 so it stays 1 px).
+            // Checkboxes as tall as a capital letter: a 1 px border, filled when on (drawn 1:1 so the border stays 1 px).
             MeasureText(font, FontSize);
-            CheckOff = Checkbox(Menu.CheckOffFill, Menu.CheckBorder);
-            CheckOffHover = Checkbox(Menu.CheckOffFill, Menu.CheckOffHoverBorder);
-            CheckOn = Checkbox(Menu.Accent, Menu.CheckOnBorder);
-            CheckOnHover = Checkbox(Menu.CheckOnHoverFill, Menu.CheckOnHoverBorder);
+            CheckOff = Checkbox(Menu.Main, Menu.Text);
+            CheckOffHover = Checkbox(Menu.Main, Menu.Hover);
+            CheckOn = Checkbox(Menu.Text, Menu.Text);
+            CheckOnHover = Checkbox(Menu.Hover, Menu.Hover);
 
             _skin.window = Window;
             _skin.label = Label;
@@ -219,9 +246,8 @@ namespace VirtualJoystick
             _skin.textField = new GUIStyle(KeyButton) { alignment = TextAnchor.MiddleLeft };
             _skin.scrollView = new GUIStyle();
             _skin.verticalScrollbar = new GUIStyle { fixedWidth = Gap, margin = new RectOffset(Gap, 0, 0, 0) };
-            _skin.verticalScrollbar.normal.background = Solid(Menu.ScrollTrack);
             _skin.verticalScrollbarThumb = new GUIStyle { fixedWidth = Gap };
-            _skin.verticalScrollbarThumb.normal.background = Solid(Menu.ScrollThumb);
+            _skin.verticalScrollbarThumb.normal.background = fill;
             _skin.verticalScrollbarUpButton = new GUIStyle();
             _skin.verticalScrollbarDownButton = new GUIStyle();
             _skin.horizontalScrollbar = new GUIStyle();
@@ -240,15 +266,48 @@ namespace VirtualJoystick
             return t;
         }
 
+        // The window's colour inside a border of the given width; 9-sliced with a style border of the same width so the
+        // edge keeps its width at any size.
+        private static Texture2D Frame(Color c, int width)
+        {
+            int n = width * 2 + 1;
+            var t = new Texture2D(n, n, TextureFormat.RGBA32, false) { hideFlags = HideFlags.HideAndDontSave, filterMode = FilterMode.Point, wrapMode = TextureWrapMode.Clamp };
+            for (int y = 0; y < n; y++)
+                for (int x = 0; x < n; x++)
+                    t.SetPixel(x, y, x == width && y == width ? Menu.Main : c);
+            t.Apply();
+            return t;
+        }
+
+        // Length of each arm of a section's corner marks.
+        private const int CornerArm = 8;
+
+        // The window's colour with 1 px L-shaped marks in the four corners. 9-sliced with a style border of CornerArm:
+        // the corners are drawn as they are and the edges between them (all background) stretch.
+        private static Texture2D Corners(Color c)
+        {
+            int n = CornerArm * 2 + 1;
+            var t = new Texture2D(n, n, TextureFormat.RGBA32, false) { hideFlags = HideFlags.HideAndDontSave, filterMode = FilterMode.Point, wrapMode = TextureWrapMode.Clamp };
+            for (int y = 0; y < n; y++)
+                for (int x = 0; x < n; x++)
+                {
+                    bool edgeX = x == 0 || x == n - 1, edgeY = y == 0 || y == n - 1;
+                    bool nearX = x < CornerArm || x > n - 1 - CornerArm, nearY = y < CornerArm || y > n - 1 - CornerArm;
+                    t.SetPixel(x, y, (edgeY && nearX) || (edgeX && nearY) ? c : Menu.Main);
+                }
+            t.Apply();
+            return t;
+        }
+
         private const int SliderHeight = 17;
 
-        // Transparent, with a 1 px line across the middle row; drawn at its own height so the line stays 1 px.
+        // The window's colour, with a 1 px line across the middle row; drawn at its own height so the line stays 1 px.
         private static Texture2D HorizontalLine(int height, Color c)
         {
             var t = new Texture2D(2, height, TextureFormat.RGBA32, false) { hideFlags = HideFlags.HideAndDontSave, filterMode = FilterMode.Point, wrapMode = TextureWrapMode.Clamp };
             for (int y = 0; y < height; y++)
                 for (int x = 0; x < 2; x++)
-                    t.SetPixel(x, y, y == height / 2 ? c : Color.clear);
+                    t.SetPixel(x, y, y == height / 2 ? c : Menu.Main);
             t.Apply();
             return t;
         }

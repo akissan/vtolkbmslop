@@ -56,13 +56,15 @@ namespace VirtualJoystick
             // The window keeps the skin active when it's created, so the themed skin applies to all of its contents.
             GUISkin saved = GUI.skin;
             GUI.skin = Theme.Skin;
-            _rect = GUILayout.Window(WindowId, _rect, DrawContents, "KBM SLOP", Theme.Window, GUILayout.Width(WindowWidth), GUILayout.Height(height));
+            string key = VirtualJoystickSettings.Current.menuKey;
+            string title = string.IsNullOrEmpty(key) || key == "None" ? "KBM SLOP" : $"KBM SLOP [{KeyDisplayName(key)}]";
+            _rect = GUILayout.Window(WindowId, _rect, DrawContents, title, Theme.Window, GUILayout.Width(WindowWidth), GUILayout.Height(height));
             GUI.skin = saved;
         }
 
         private const float WindowWidth = 640f;
         private const float TabGap = Theme.Gap;
-        private static readonly string[] Tabs = { "Settings", "Virtual Joystick", "Bindings" };
+        private static readonly string[] Tabs = { "GENERAL", "VIRTUAL JOYSTICK", "BINDINGS" };
         private static int _tab;
         private static readonly Vector2[] Scroll = new Vector2[3];
 
@@ -94,7 +96,7 @@ namespace VirtualJoystick
                 _tab = tab;
                 _rebinding = null;
             }
-            GUILayout.Space(Theme.Gap);
+            GUILayout.Space(Theme.Gap * 2);
 
             Scroll[shown] = GUILayout.BeginScrollView(Scroll[shown], false, true);
             if (shown == 0)
@@ -105,25 +107,31 @@ namespace VirtualJoystick
                 DrawBindingsTab(s);
             GUILayout.EndScrollView();
 
-            GUILayout.Space(Theme.Gap);
+            GUILayout.Space(Theme.Gap * 2);
             GUILayout.BeginHorizontal();
+            // The reset button resets what the tab shows: the settings, or (Bindings tab) only the keys.
             if (shown < 2)
             {
-                if (GUILayout.Button("Reset settings to defaults", Theme.Flush))
+                if (GUILayout.Button("RESET SETTINGS TO DEFAULTS", Theme.Flush))
                 {
                     VirtualJoystickSettings.ResetToDefaults();
                     _rebinding = null;
                     KeysChanged = true;
                 }
-                GUILayout.Space(TabGap);
             }
-            if (GUILayout.Button("Close", Theme.Flush))
+            else if (GUILayout.Button("RESET KEY BINDINGS TO DEFAULTS", Theme.Flush))
+            {
+                VirtualJoystickSettings.ResetKeysToDefaults();
+                _rebinding = null;
+                KeysChanged = true;
+            }
+            GUILayout.Space(TabGap);
+            if (GUILayout.Button("CLOSE", Theme.Flush))
                 Close();
             GUILayout.Space(Theme.ScrollbarSpace);
             GUILayout.EndHorizontal();
-            GUILayout.Label(_rebinding != null
-                ? "Press a key to bind. Esc cancels, Delete or Backspace clears."
-                : $"{s.menuKey} toggles this window. Click a binding, then press the new key.", Small());
+            if (_rebinding != null)
+                GUILayout.Label("Press a key to bind. Esc cancels, Delete or Backspace clears.", Theme.Footer);
 
             GUI.DragWindow();
         }
@@ -175,6 +183,7 @@ namespace VirtualJoystick
 
             BeginPanel("Response curve");
             s.curve = Slider("Centre curve (inverse cubic)", s.curve, 0f, 1f, "0%");
+            GUILayout.Space(Theme.Panel.margin.bottom); // as far from the graph as sections are from each other
             DrawResponseGraph();
             EndPanel();
 
@@ -184,7 +193,7 @@ namespace VirtualJoystick
             EndPanel();
         }
 
-        // A grey semi-transparent panel with hard corners; optional accent-coloured title.
+        // A section: corner marks, no background; optional title.
         private static void BeginPanel(string title)
         {
             GUILayout.BeginVertical(Theme.Panel);
@@ -213,9 +222,11 @@ namespace VirtualJoystick
         // Set when a binding changes; the behaviour re-reads its keys and clears it.
         public static bool KeysChanged;
 
+        private const float KeyLabelWidth = 300f;
+
         // One "label | key" row; the key button starts capture. A key that's also bound elsewhere shows in yellow, with
         // a wrapped "Also used by: ..." line under the row naming every clash.
-        private static void KeyRow(Bind b, float labelWidth = 300f)
+        private static void KeyRow(Bind b, float labelWidth = KeyLabelWidth)
         {
             string current = b.Get(VirtualJoystickSettings.Current);
             var clashes = Clashes(b, current);
@@ -226,20 +237,19 @@ namespace VirtualJoystick
             }
             GUILayout.BeginHorizontal();
             GUILayout.BeginVertical(GUILayout.Width(labelWidth));
+            // Lowered so the name's first line sits level with the key's text (the key button's margin and padding are
+            // taller than the label's).
+            GUILayout.Space(Theme.KeyButton.margin.top + Theme.KeyButton.padding.top - Theme.LabelWrap.padding.top);
             GUILayout.Label(b.Label, Theme.LabelWrap);
             if (hint != null)
                 GUILayout.Label(hint, HintStyle()); // what this input does in the aircraft you're sitting in
             GUILayout.EndVertical();
             bool capturing = _rebinding == b;
             string text = capturing ? "Press a key…" : KeyDisplayName(current);
-            Color saved = GUI.contentColor;
-            if (capturing)
-                GUI.contentColor = Theme.Menu.Accent;
-            else if (clashes.Count > 0)
-                GUI.contentColor = Theme.Menu.Warning;
-            if (GUILayout.Button(text, Theme.KeyButton, GUILayout.ExpandWidth(true)))
+            // Waiting for a key: filled, text in the window's colour.
+            GUIStyle keyStyle = capturing ? Theme.KeyButtonCapture : clashes.Count > 0 ? Theme.KeyButtonClash : Theme.KeyButton;
+            if (GUILayout.Button(text, keyStyle, GUILayout.ExpandWidth(true)))
                 _rebinding = capturing ? null : b;
-            GUI.contentColor = saved;
             GUILayout.EndHorizontal();
             if (clashes.Count > 0 && !capturing)
                 GUILayout.Label("Also used by: " + string.Join(", ", clashes), Theme.WarningText);
@@ -594,21 +604,13 @@ namespace VirtualJoystick
         private static void DrawBindingsTab(VirtualJoystickSettings s)
         {
             string vehicle = Cockpit.KeyActions.VehicleName;
-            BeginPanel(null);
-            GUILayout.BeginHorizontal();
-            GUILayout.Label(vehicle != null
-                ? $"In {vehicle}. Keys apply to every aircraft; the grey lines say what they do here."
-                : "Keys apply to every aircraft. Sit in a cockpit to see what each one does there.", Small());
-            if (vehicle != null && GUILayout.Button("Rescan", GUILayout.Width(84f)))
-                Cockpit.KeyActions.Rescan();
-            GUILayout.EndHorizontal();
-            if (GUILayout.Button("Reset key bindings to defaults"))
+            if (vehicle != null)
             {
-                VirtualJoystickSettings.ResetKeysToDefaults();
-                _rebinding = null;
-                KeysChanged = true;
+                BeginPanel(null);
+                if (GUILayout.Button($"Rescan {vehicle} controls", Theme.Flush))
+                    Cockpit.KeyActions.Rescan();
+                EndPanel();
             }
-            EndPanel();
 
             foreach (var section in Sections)
             {
@@ -629,11 +631,15 @@ namespace VirtualJoystick
             bool missing = Cockpit.KeyActions.VehicleName != null && card.Available != null && !card.Available();
             bool clash = CardHasClash(card);
             string header = card.Title + (bound > 0 ? $"   ({bound} bound)" : "") + (missing ? "   (not in this aircraft)" : "");
-            Color savedColor = GUI.contentColor;
-            if (clash)
-                GUI.contentColor = Theme.Menu.Warning; // one of its keys is also bound elsewhere
-            bool clicked = GUILayout.Button(header, open ? Theme.CardHeaderOpen : CardHeader());
-            GUI.contentColor = savedColor;
+            // Framed by a 1 px border; when open the frame holds the header and key rows together. Yellow frame and
+            // header text when one of its keys is also bound elsewhere.
+            if (open)
+                GUILayout.BeginVertical(clash ? Theme.CardOpenClash : Theme.CardOpen);
+            GUIStyle headerStyle = open
+                ? (clash ? Theme.CardHeaderOpenClash : Theme.CardHeaderOpen)
+                : (clash ? Theme.CardHeaderClash : CardHeader());
+            bool clicked = GUILayout.Button(header, headerStyle);
+            bool headerHover = open && GUILayoutUtility.GetLastRect().Contains(Event.current.mousePosition);
             if (clicked)
             {
                 // Takes effect next frame: IMGUI needs this event to keep the layout it was laid out with.
@@ -648,13 +654,23 @@ namespace VirtualJoystick
                 if (at.HasValue)
                     HighlightPositions.Add(at.Value);
             }
-            // Body continues straight under the header, same shade, so the open card reads as one block.
             GUILayout.BeginVertical(Theme.CardBody);
             foreach (var b in card.Binds)
                 KeyRow(b);
             if (card.ThrottleRate)
-                s.throttleRate = Slider("Throttle speed", s.throttleRate, 0.1f, 3f, "0.00'/s'");
+            {
+                // Spaced and lined up like the key rows above it: label in their name column, top and bottom gaps
+                // such that its text sits where a key row's would.
+                float pad = Theme.KeyButton.margin.top + Theme.KeyButton.padding.top - Theme.Label.padding.top;
+                GUILayout.Space(pad);
+                s.throttleRate = Slider("Throttle speed", s.throttleRate, 0.1f, 3f, "0.00'/s'", KeyLabelWidth);
+                GUILayout.Space(pad);
+            }
             GUILayout.EndVertical();
+            GUILayout.EndVertical(); // the frame
+            // Hovering an open card's header turns its whole frame white, like a closed card's.
+            if (headerHover && Event.current.type == EventType.Repaint)
+                Outline(GUILayoutUtility.GetLastRect(), Theme.Menu.Hover);
         }
 
         private static int CountBound(Bind[] binds)
@@ -683,45 +699,41 @@ namespace VirtualJoystick
             Rect g = GUILayoutUtility.GetRect(graphW, graphH, GUILayout.Width(graphW), GUILayout.Height(graphH));
             GUILayout.FlexibleSpace();
             GUILayout.EndHorizontal();
-            GUILayout.Label("Response: stick deflection → output", Small());
 
             if (Event.current.type != EventType.Repaint)
                 return;
 
             var s = VirtualJoystickSettings.Current;
-            Fill(g, Theme.Menu.GraphBg);
+            // One colour throughout: the outline with quarter ticks, the deadzone edge as a dotted vertical line, the
+            // linear reference as a dotted diagonal and the response as a solid 2 px curve.
+            Color c = Theme.Menu.Text;
 
-            // Quarter grid.
-            Color grid = Theme.Menu.GraphGrid;
+            Outline(g, c);
+            const float tick = 4f;
             for (int i = 1; i < 4; i++)
             {
-                Fill(new Rect(g.x + g.width * i / 4f, g.y, 1f, g.height), grid);
-                Fill(new Rect(g.x, g.y + g.height * i / 4f, g.width, 1f), grid);
+                float tx = Mathf.Round(g.x + g.width * i / 4f), ty = Mathf.Round(g.y + g.height * i / 4f);
+                Fill(new Rect(tx, g.yMax - tick, 1f, tick), c);
+                Fill(new Rect(g.x, ty, tick, 1f), c);
             }
 
-            // Deadzone band.
-            float dzW = s.deadzone * g.width;
-            if (dzW >= 1f)
-                Fill(new Rect(g.x, g.y, dzW, g.height), Theme.Menu.GraphDeadzone);
+            float dzX = Mathf.Round(g.x + s.deadzone * g.width);
+            if (dzX - g.x >= 1f)
+                for (float y = g.y; y < g.yMax; y += 4f)
+                    Fill(new Rect(dzX, y, 1f, 2f), c);
 
-            // Linear reference diagonal, then the actual response, drawn column by column.
-            Color linear = Theme.Menu.GraphLinear;
-            Color curve = Theme.Menu.GraphCurve;
-            float prevLin = g.yMax, prevOut = g.yMax;
+            float prevOut = g.yMax;
             int cols = Mathf.RoundToInt(g.width);
             for (int i = 0; i <= cols; i++)
             {
                 float a = i / (float)cols;
                 float x = g.x + i;
-                float yLin = g.yMax - a * g.height;
+                if (i % 4 == 0)
+                    Fill(new Rect(x, Mathf.Round(g.yMax - a * g.height), 1f, 1f), c);
                 float yOut = g.yMax - VirtualJoystickBehaviour.AxisResponse(a) * g.height;
-                VSpan(x, prevLin, yLin, 1f, linear);
-                VSpan(x, prevOut, yOut, 2f, curve);
-                prevLin = yLin;
+                VSpan(x, prevOut, yOut, 2f, c);
                 prevOut = yOut;
             }
-
-            Outline(g, Theme.Menu.GraphOutline);
         }
 
         // Vertical bar joining two consecutive samples, so steep parts of the curve stay continuous.
@@ -756,17 +768,18 @@ namespace VirtualJoystick
             Fill(new Rect(r.xMax - 1f, r.y, 1f, r.height), color);
         }
 
-        private static float Slider(string label, float value, float min, float max, string format)
+        // Label | slider | value: the slider takes all the width the label and the (right-aligned) value leave.
+        private static float Slider(string label, float value, float min, float max, string format, float labelWidth = 260f)
         {
             GUILayout.BeginHorizontal();
-            GUILayout.Label(label, Theme.Label, GUILayout.Width(260f));
-            float v = GUILayout.HorizontalSlider(value, min, max, Theme.Slider, Theme.SliderThumb, GUILayout.Width(230f));
-            GUILayout.Label(v.ToString(format), Theme.Label, GUILayout.Width(70f));
+            GUILayout.Label(label, Theme.Label, GUILayout.Width(labelWidth));
+            float v = GUILayout.HorizontalSlider(value, min, max, Theme.Slider, Theme.SliderThumb, GUILayout.ExpandWidth(true));
+            GUILayout.Label(v.ToString(format), Theme.SliderValue, GUILayout.Width(64f));
             GUILayout.EndHorizontal();
             return v;
         }
 
-        // Checkbox: grey border on dark when off, bright blue when on. Drawn by hand so it looks exactly like that.
+        // Checkbox: hollow when off, filled when on. Drawn by hand so it looks exactly like that.
         private static bool Toggle(string label, bool value)
         {
             // The box is as tall as the text's capitals, centred on the text line.
