@@ -154,8 +154,10 @@ namespace VirtualJoystick
         public string armingAaKey = "None";
         public string armingAgKey = "None";
         public string armingToggleKey = "None";
-        // TGP zoom: one step in per press, back to the widest after the narrowest. "BackQuote" = the ~ key.
+        // TGP zoom: one step in per tap, back to the widest after the narrowest. "BackQuote" = the ~ key.
         public string tgpZoomCycleKey = "BackQuote";
+        // Holding the zoom cycle key this long snaps straight to the widest (1x) zoom. 0 = no hold action (steps on press).
+        public float tgpZoomResetHoldSeconds = 0.5f;
 
         // Pilot.
         public string visorDownKey = "None";

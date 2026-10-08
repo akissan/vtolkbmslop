@@ -83,7 +83,39 @@ namespace VirtualJoystick.Cockpit
 
             if (KeyActions.Pressed(S.soiZoomInKey)) Zoom(+1);
             if (KeyActions.Pressed(S.soiZoomOutKey)) Zoom(-1);
-            if (KeyActions.Pressed(S.tgpZoomCycleKey)) CycleTgpZoom();
+            UpdateTgpZoomCycle();
+        }
+
+        // Tap the zoom cycle key: one step (on release, so a hold never zooms in first). Hold it for
+        // tgpZoomResetHoldSeconds: straight back to the widest zoom.
+        private static float _zoomCycleDownAt = -1f;
+        private static bool _zoomCycleConsumed;
+
+        private static void UpdateTgpZoomCycle()
+        {
+            float hold = S.tgpZoomResetHoldSeconds;
+            if (hold <= 0f)
+            {
+                if (KeyActions.Pressed(S.tgpZoomCycleKey)) CycleTgpZoom();
+                _zoomCycleDownAt = -1f;
+                return;
+            }
+            bool held = KeyActions.Held(S.tgpZoomCycleKey);
+            if (held && _zoomCycleDownAt < 0f)
+            {
+                _zoomCycleDownAt = Time.unscaledTime;
+                _zoomCycleConsumed = false;
+            }
+            else if (held && !_zoomCycleConsumed && Time.unscaledTime - _zoomCycleDownAt >= hold)
+            {
+                _zoomCycleConsumed = true;
+                ResetTgpZoom();
+            }
+            else if (!held && _zoomCycleDownAt >= 0f)
+            {
+                if (!_zoomCycleConsumed) CycleTgpZoom();
+                _zoomCycleDownAt = -1f;
+            }
         }
 
         public static bool HasTgp => _tgps.Length > 0;
@@ -170,21 +202,41 @@ namespace VirtualJoystick.Cockpit
         // whether or not the TGP is the SOI: the SOI TGP if there is one, else the first powered one.
         private static void CycleTgpZoom()
         {
+            var tgp = ZoomTgp();
+            if (tgp == null)
+                return;
+            if (tgp.fovIdx < tgp.fovs.Length - 1)
+                tgp.ZoomIn(); // also syncs to the other seat and plays the zoom sound
+            else
+                SetWidest(tgp);
+        }
+
+        // Straight back to the widest TGP zoom (1x), on the same TGP the cycle uses.
+        private static void ResetTgpZoom()
+        {
+            var tgp = ZoomTgp();
+            if (tgp != null && tgp.fovIdx != 0)
+                SetWidest(tgp);
+        }
+
+        // The SOI TGP if there is one, else the first powered one; null if none has zoom levels.
+        private static TargetingMFDPage ZoomTgp()
+        {
             TargetingMFDPage tgp = null;
             foreach (var t in _tgps)
                 if (t != null && t.isSOI) { tgp = t; break; }
             if (tgp == null)
                 foreach (var t in _tgps)
                     if (t != null && t.powered) { tgp = t; break; }
-            if (tgp == null || tgp.fovs == null || tgp.fovs.Length == 0)
+            return tgp == null || tgp.fovs == null || tgp.fovs.Length == 0 ? null : tgp;
+        }
+
+        private static void SetWidest(TargetingMFDPage tgp)
+        {
+            if (!tgp.powered)
                 return;
-            if (tgp.fovIdx < tgp.fovs.Length - 1)
-                tgp.ZoomIn(); // also syncs to the other seat and plays the zoom sound
-            else if (tgp.powered)
-            {
-                tgp.RemoteSetFovIdx(0);
-                tgp.OnSetFovIdx?.Invoke(0);
-            }
+            tgp.RemoteSetFovIdx(0);
+            tgp.OnSetFovIdx?.Invoke(0);
         }
 
         public static void ReleaseAll()

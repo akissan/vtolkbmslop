@@ -557,7 +557,7 @@ namespace VirtualJoystick
                 } },
                 new BindCard { Title = "TGP zoom", Available = () => Cockpit.SoiKeys.HasTgp, Binds = new[]
                 {
-                    B("Cycle zoom (widest after narrowest)", s => s.tgpZoomCycleKey, (s, v) => s.tgpZoomCycleKey = v),
+                    B("Cycle zoom (hold: back to 1x)", s => s.tgpZoomCycleKey, (s, v) => s.tgpZoomCycleKey = v),
                 } },
             } },
             new BindSection { Title = "PILOT", Cards = new[]
