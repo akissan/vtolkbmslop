@@ -49,6 +49,22 @@ namespace VirtualJoystick
             return true;
         }
 
+        // Clip to the game window without moving the cursor or reading it (free look in clickable mode). Release undoes it.
+        public static void Confine()
+        {
+            if (!TryGetClientRect(out RECT rect))
+                return;
+            ClipCursor(ref rect);
+            _captured = true;
+        }
+
+        // Put the cursor at the centre of the game window.
+        public static void Center()
+        {
+            if (TryGetClientRect(out RECT rect))
+                SetCursorPos((rect.Left + rect.Right) / 2, (rect.Top + rect.Bottom) / 2);
+        }
+
         public static void Release()
         {
             if (!_captured)

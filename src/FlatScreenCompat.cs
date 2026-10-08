@@ -45,6 +45,25 @@ namespace VirtualJoystick
 
             try
             {
+                // Hover / clicks aim through GetMouseRay; centred in clickable mode + free look (CenterCursor).
+                var mouseRay = AccessTools.Method(type, "GetMouseRay");
+                SuppressRmbCamera = AccessTools.Field(type, "suppressRightMouseCamera");
+                TargetedField = AccessTools.Field(type, "targetedVRInteractable");
+                if (mouseRay == null)
+                    Log.Warn("FlatScreen 3 found but GetMouseRay is missing; the centre cursor won't aim its clicks.");
+                else
+                {
+                    _harmony.Patch(mouseRay, prefix: new HarmonyMethod(typeof(FlatScreenCompat), nameof(GetMouseRayPrefix)));
+                    Log.Info("Hooked FlatScreen 3 mouse ray");
+                }
+            }
+            catch (Exception e)
+            {
+                Log.Error("Failed to hook FlatScreen 3 mouse ray: " + e);
+            }
+
+            try
+            {
                 var update = AccessTools.Method(type, "Update");
                 var setFov = AccessTools.Method(type, "SetCameraFOV");
                 TargetFov = AccessTools.Field(type, "_targetFoV");
@@ -67,6 +86,40 @@ namespace VirtualJoystick
                 TargetFov = null;
                 Log.Error("Failed to hook FlatScreen 3 FOV: " + e);
             }
+        }
+
+        // ---------------------------------------------------------------- centre cursor
+
+        private static FieldInfo SuppressRmbCamera; // FlatScreen3MonoBehaviour.suppressRightMouseCamera
+
+        // RMB went down on a rotary knob: FlatScreen 3 pressed it instead of starting free look.
+        public static bool RmbOnControl
+        {
+            get
+            {
+                object fs = SuppressRmbCamera == null ? null : FsInstance();
+                return fs != null && (bool)SuppressRmbCamera.GetValue(fs);
+            }
+        }
+
+        private static FieldInfo TargetedField; // FlatScreen3MonoBehaviour.targetedVRInteractable
+
+        // The cockpit control FlatScreen 3 has under the cursor (for the log), or null.
+        public static VRInteractable Targeted
+        {
+            get
+            {
+                object fs = TargetedField == null ? null : FsInstance();
+                return fs == null ? null : TargetedField.GetValue(fs) as VRInteractable;
+            }
+        }
+
+        private static bool GetMouseRayPrefix(UnityEngine.Camera camera, ref UnityEngine.Ray __result)
+        {
+            if (!VirtualJoystickBehaviour.CenterCursor || camera == null)
+                return true;
+            __result = new UnityEngine.Ray(camera.transform.position, camera.transform.forward);
+            return false;
         }
 
         // ---------------------------------------------------------------- camera FOV
@@ -170,6 +223,8 @@ namespace VirtualJoystick
             _harmony = null;
             _attempted = false;
             TargetFov = null;
+            SuppressRmbCamera = null;
+            TargetedField = null;
             _instanceProp = null;
             _inFsUpdate = false;
         }

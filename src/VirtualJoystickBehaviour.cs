@@ -23,6 +23,12 @@ namespace VirtualJoystick
         public static bool ClickMode { get; private set; }
         // FlatScreen 3 hover/click is suppressed while the mouse is flying the aircraft or driving an SOI page.
         public static bool SuppressCockpitHover => (IsActive && !ClickMode) || SoiMode;
+        // Clickable mode plus FlatScreen 3 free look (RMB held, not pressing a rotary knob): the cockpit is pointed at
+        // from the centre of the screen, where a cursor is drawn, so LMB / wheel work on whatever the view is aimed at.
+        public static bool CenterCursor => ClickMode && Input.GetMouseButton(1) && !FlatScreenCompat.RmbOnControl;
+        // Where cockpit hover / clicks aim, in screen pixels (y up): the mouse, or the screen centre (CenterCursor).
+        public static Vector3 CursorPoint => CenterCursor
+            ? new Vector3(Screen.width * 0.5f, Screen.height * 0.5f, 0f) : Input.mousePosition;
 
         // Stick off, free look in a head mode (or a head-mode press still held): LMB isn't a cockpit click.
         public static bool HeadModeOwnsLmb =>
@@ -48,6 +54,7 @@ namespace VirtualJoystick
         private Vector2 _virtualPos;  // raw mouse-driven position, -1..1 per axis
         private float _yaw;
         private bool _freeLook;
+        private bool _centerCursor; // CenterCursor last frame
         private bool _skipNextDelta;
 
         // Diagnostics, logged on deactivate: total movement seen by each mouse source.
@@ -353,10 +360,25 @@ namespace VirtualJoystick
             ClickMode = !menuOpen && !_holdActivated && IsHeld(_clickKey);
             if (menuOpen || ClickMode)
             {
-                Win32Mouse.Release();
+                // Centre cursor: keep the hidden cursor inside the window while free look moves it, and put it back
+                // at the centre when RMB is let go, so the visible cursor carries on from where the centre one was.
+                bool center = CenterCursor;
+                if (center)
+                    Win32Mouse.Confine();
+                else if (_centerCursor && ClickMode)
+                    Win32Mouse.Center();
+                _centerCursor = center;
+                if (ClickMode && Input.GetMouseButtonDown(0))
+                    LogClickModeClick(center);
+                if (!center)
+                    Win32Mouse.Release();
                 if (menuOpen || !wasClickMode)
                     Cursor.visible = true;
                 _skipNextDelta = true;
+            }
+            else
+            {
+                _centerCursor = false;
             }
 
             if (GetPlayerVehicle() == null)
@@ -1031,6 +1053,8 @@ namespace VirtualJoystick
 
             if (ClickMode)
                 DrawClickModeOverlay();
+            if (CenterCursor)
+                DrawCenterCursor();
             else if (IsActive || SettingsWindow.IsOpen)
                 DrawStickOverlay();
             else if (SoiMode)
@@ -1113,6 +1137,34 @@ namespace VirtualJoystick
             GUI.color = color;
             GUI.DrawTexture(new Rect(p.x - r, p.y - r, r * 2f, r * 2f), _dot);
             GUI.color = Color.white;
+        }
+
+        // What a clickable-mode LMB press lands on, for tracking down controls that won't press.
+        private static void LogClickModeClick(bool center)
+        {
+            VRInteractable fs = FlatScreenCompat.Targeted;
+            string fsName = fs == null ? "none" : $"'{fs.GetControlReferenceName()}' ({fs.name})";
+            string screen = ScreenPointer.HoverInfo == null ? "none" : ScreenPointer.HoverInfo.Replace('\n', ' ');
+            Log.Info($"Clickable-mode click ({(center ? "centre cursor" : "mouse")}): FlatScreen 3 target {fsName}, screen element {screen}");
+        }
+
+        // Clickable mode + free look: FlatScreen 3 hides the cursor, so a small crosshair marks the screen centre,
+        // where hover and clicks aim. White with a dark outline so it reads on any background.
+        private void DrawCenterCursor()
+        {
+            Vector2 c = new Vector2(Mathf.Round(Screen.width * 0.5f), Mathf.Round(Screen.height * 0.5f));
+            const float arm = 7f, gap = 2f;
+            Color outline = new Color(0f, 0f, 0f, 0.8f);
+            for (int pass = 0; pass < 2; pass++)
+            {
+                float w = pass == 0 ? 4f : 2f;
+                float ext = pass == 0 ? 1f : 0f;
+                Color col = pass == 0 ? outline : Color.white;
+                DrawLine(c + new Vector2(-arm - ext, 0f), c + new Vector2(-gap + ext, 0f), w, col);
+                DrawLine(c + new Vector2(gap - ext, 0f), c + new Vector2(arm + ext, 0f), w, col);
+                DrawLine(c + new Vector2(0f, -arm - ext), c + new Vector2(0f, -gap + ext), w, col);
+                DrawLine(c + new Vector2(0f, gap - ext), c + new Vector2(0f, arm + ext), w, col);
+            }
         }
 
         private static readonly Color OverlayGreen = new Color(0.55f, 1f, 0.6f, 1f);
@@ -1409,7 +1461,7 @@ namespace VirtualJoystick
                 _tooltipStyle.font = Theme.HudFont;
             _tooltipStyle.normal.textColor = new Color(0.75f, 0.95f, 1f, 1f);
             Vector2 size = _tooltipStyle.CalcSize(new GUIContent(text));
-            Vector2 m = Input.mousePosition;
+            Vector2 m = CursorPoint;
             float x = Mathf.Min(m.x + 18f, Screen.width - size.x - 4f);
             float y = Mathf.Min(Screen.height - m.y + 18f, Screen.height - size.y - 4f);
             var r = new Rect(x, y, size.x, size.y);

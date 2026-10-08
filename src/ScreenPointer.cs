@@ -1055,11 +1055,12 @@ namespace VirtualJoystick
         // FOV/aspect ray, which drifts off-target whenever the projection isn't a plain symmetric full-screen one.
         private static Ray MouseRay(Camera cam)
         {
+            Vector3 m = VirtualJoystickBehaviour.CursorPoint;
             if (cam.targetTexture == null)
-                return cam.ScreenPointToRay(Input.mousePosition);
+                return cam.ScreenPointToRay(m);
             // Rendering to a texture: fall back to the FOV-built ray over the whole screen.
-            float x = Input.mousePosition.x / Screen.width * 2f - 1f;
-            float y = Input.mousePosition.y / Screen.height * 2f - 1f;
+            float x = m.x / Screen.width * 2f - 1f;
+            float y = m.y / Screen.height * 2f - 1f;
             float tan = Mathf.Tan(cam.fieldOfView * 0.5f * Mathf.Deg2Rad);
             float aspect = (float)Screen.width / Screen.height;
             Vector3 dir = new Vector3(x * tan * aspect, y * tan, 1f);
