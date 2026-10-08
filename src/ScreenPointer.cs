@@ -4,7 +4,7 @@ using System.Reflection;
 using HarmonyLib;
 using UnityEngine;
 
-namespace MouseStick
+namespace VirtualJoystick
 {
     // Replaces FlatScreen 3's handling of everything drawn on cockpit screens (MFD / portal on-screen buttons and
     // touchscreen drag surfaces, e.g. the F-45's displays). Physical knobs, switches and buttons stay with FlatScreen 3.
@@ -74,6 +74,23 @@ namespace MouseStick
         private static VRTouchScreenInteractable _touching;
 
         public static bool Available => ResolveFlatScreen();
+
+        // FlatScreen 3's eye camera (what the player sees), or null.
+        public static Camera Camera => ResolveFlatScreen() ? GetCamera() : null;
+
+        // World point -> GUI coordinates (y down) through that camera; false if behind it.
+        public static bool WorldToGui(Vector3 world, out Vector2 gui)
+        {
+            gui = default;
+            Camera cam = Camera;
+            if (cam == null)
+                return false;
+            Vector3 sp = WorldToScreen(cam, world);
+            if (sp.z <= 0f)
+                return false;
+            gui = new Vector2(sp.x, Screen.height - sp.y);
+            return true;
+        }
 
         // The mouse is over a screen element this class handles (FlatScreen 3 should do nothing this frame).
         public static bool HasHover => _hoverButton != null || _hoverTouch != null || _pressed != null || _touching != null;
@@ -605,7 +622,7 @@ namespace MouseStick
         // One line per click, so a wrong press can be diagnosed from Player.log.
         private static void LogClick(VRInteractable pressed)
         {
-            var sb = new System.Text.StringBuilder("[MouseStick] Screen click: ");
+            var sb = new System.Text.StringBuilder("[VirtualJoystick] Screen click: ");
             sb.Append(Describe(pressed));
             int others = 0;
             foreach (var h in Hits)
@@ -679,7 +696,7 @@ namespace MouseStick
             _pressed = null;
             if (v == null)
                 return;
-            Debug.Log($"[MouseStick] Screen release: '{ButtonName(v)}' held {Time.unscaledTime - _pressStart:0.00}s");
+            Debug.Log($"[VirtualJoystick] Screen release: '{ButtonName(v)}' held {Time.unscaledTime - _pressStart:0.00}s");
 
             if (v.GetComponent<VRButton>() != null)
             {
@@ -738,7 +755,7 @@ namespace MouseStick
             }
             if (!RayHitsRect(t.screenRect, t.screenRect.rect, 0f, ray, out _, out Vector3 point))
                 return;
-            Debug.Log($"[MouseStick] Screen touch: {t.name}");
+            Debug.Log($"[VirtualJoystick] Screen touch: {t.name}");
             _touching = t;
             SetTouchingLocalPoint.Invoke(t, new object[] { t.transform.InverseTransformPoint(point) });
             SetIsTouching.Invoke(t, new object[] { true });

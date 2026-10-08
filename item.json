@@ -1,13 +1,13 @@
 {
   "$schema": "https://gitlab.com/vtolvr-mods/ModLoader/-/raw/release/schema.json",
-  "Title": "Mouse Stick",
-  "Description": "Virtual joystick for flat-screen play. Tap CTRL to toggle: mouse deflection from the centre of an on-screen box drives pitch and roll, Q/E drive rudder, LMB fires the stick trigger. Designed to work alongside FlatScreen 3 and BYOJoystick.\n\nClient-side only.",
+  "Title": "KBM SLOP",
+  "Description": "Mouse and keyboard flying for flat-screen play with FlatScreen 3. Tap C to toggle the virtual joystick (or hold Left Alt): mouse deflection drives pitch and roll, WASD/QE stick and rudder, Shift/Ctrl throttle, Space fires, LMB presses the SOI thumbstick. T puts the mouse on the SOI page (TGP, radar, map, TSD). Sensor MFD touchscreens get accurate hitboxes. F8 for settings and key bindings (controller buttons, flaps, gear, hook, launch bar, radar, visor, NVG). Does not need BYOJoystick.\n\nClient-side only.",
   "Tags": [
     "ClientSide"
   ],
   "PreviewImageUrl": "",
   "MetaData": {
-    "DllName": "MouseStick.dll",
+    "DllName": "VirtualJoystick.dll",
     "AllowLoadOnStart": true,
     "ShowOnMainList": true,
     "DllHash": ""

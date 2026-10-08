@@ -2,7 +2,7 @@ using System.Reflection;
 using HarmonyLib;
 using UnityEngine;
 
-namespace MouseStick
+namespace VirtualJoystick
 {
     // FPS-style targeting pod aiming: each frame's mouse movement becomes an exact pod rotation (scaled by the
     // pod's zoom), instead of the rate-based thumbstick slew the game normally uses.
@@ -51,6 +51,12 @@ namespace MouseStick
         {
             if (_page == null || !_page.powered)
                 return;
+            // HEAD mode: the pod follows your view; LMB locks it (SoiKeys.HeadModeLmb), so the mouse leaves it alone.
+            if (_page.tgpMode == TargetingMFDPage.TGPModes.HEAD)
+            {
+                _slewing = false;
+                return;
+            }
             OpticalTargeter ot = _page.opticalTargeter;
             if (ot == null)
                 return;

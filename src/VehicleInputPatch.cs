@@ -1,7 +1,7 @@
 using HarmonyLib;
 using UnityEngine;
 
-namespace MouseStick
+namespace VirtualJoystick
 {
     // VehicleInputManager.Update pushes its stored stick value to the flight controls every frame. Every active
     // VRJoystick (F/A-26B has a side and a centre stick) and BYOJoystick write that value during Update too, in
@@ -13,9 +13,9 @@ namespace MouseStick
     {
         private static void Prefix(VehicleInputManager __instance, ref Vector3 ___vrJoyPYR, bool ___remoteCtrl)
         {
-            if (!MouseStickBehaviour.IsActive || ___remoteCtrl || __instance != MouseStickBehaviour.TargetInputManager)
+            if (!(VirtualJoystickBehaviour.IsActive || VirtualJoystickBehaviour.KeyboardFlying) || ___remoteCtrl || __instance != VirtualJoystickBehaviour.TargetInputManager)
                 return;
-            ___vrJoyPYR = MouseStickBehaviour.Output;
+            ___vrJoyPYR = VirtualJoystickBehaviour.Output;
         }
     }
 }

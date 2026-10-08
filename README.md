@@ -1,4 +1,4 @@
-# Mouse Stick (VTOL VR)
+# KBM SLOP (VTOL VR)
 
 A virtual joystick for flat-screen VTOL VR. Tap **C** to switch it on (or hold **Left Alt**
 for as long as you need it): the mouse then drives the aircraft's stick, and a box in the middle
@@ -12,15 +12,15 @@ Built for the new VTOL VR Mod Loader (Steam app "VTOL VR Mod Loader"). Works alo
 | Input | Action |
 |---|---|
 | Tap C | Toggle stick control on/off (only a clean tap counts: pressing another key while C is down cancels it). A second toggle key can be set in F8 → Keybinds |
-| Hold Left Alt | Flips stick control while held. **Stick off:** the mouse stick is on until you let go. **Stick on:** clickable mode — the mouse stops flying, the cursor comes back and clicks cockpit controls (FlatScreen 3); LMB doesn't fire; WASD and Q/E still fly; the overlay shrinks to a small dot on a faint line (opacity: `clickModeOpacity`). Key: `clickModeKey`. |
+| Hold Left Alt | Flips stick control while held. **Stick off:** the virtual joystick is on until you let go. **Stick on:** clickable mode — the mouse stops flying, the cursor comes back and clicks cockpit controls (FlatScreen 3); LMB clicks instead of pressing the thumbstick; WASD and Q/E still fly; the overlay shrinks to a small dot on a faint line (opacity: `clickModeOpacity`). Key: `clickModeKey`. |
 | Mouse move | Moves the stick. It stays where you leave it, like a real stick with no spring. |
-| Middle mouse | Re-centre the stick |
+| Middle mouse | Re-centre the stick (on release); hold (1 s by default, `middleHoldSeconds`) to re-centre the view (`middleHoldRecentersView`) |
 | Hold RMB | Free look (FlatScreen 3 camera). The stick is held still while RMB is down. |
-| LMB | Stick trigger (gun / weapon release) |
+| LMB | Thumbstick press on the SOI page (radar lock, TGP lock, select). NAV map in SOI cursor mode: GPS send. Radar in head boresight: BORE (leaves head mode). Fire weapons with Space (`triggerKey`); the overlay dot turns red while it's held. Clickable mode / stick off: clicks the cockpit |
 | W / S | Stick forward (nose down) / back (nose up), springs back when released |
 | A / D | Roll left / right, springs back when released |
 | Q / E | Rudder left / right |
-| G / hold Mouse button 4 | G toggles SOI cursor mode; holding Mouse button 4 (side "back" button) flips it while held. Works with the mouse stick on or off (turning the stick on/off doesn't cancel it; Esc/F9 do). SOI cursor mode: the mouse controls whichever MFD page is the SOI. **TGP:** FPS-style pod aiming, scaled by zoom; the pod locks into TGT mode when you start moving and re-locks when the mouse stops or SOI mode ends. **Radar / ARAD / map / TSD / other pages:** the mouse moves the page's cursor (or pans the map); when the mouse stops, the page gets "thumbstick released" so the cursor snaps to contacts. **Middle mouse:** the page's re-centre: TGP → FWD, map → reset onto the aircraft, TSD → centre on the aircraft, radar → drop lock, ARAD → deselect. **Scroll:** the page's own zoom/range buttons (TGP zoom, radar range, map zoom, TSD scale). **LMB:** thumbstick press (lock/select) on radar and ARAD; fires on TGP/map/other pages. **TSD:** LMB click = thumbstick press (select/deselect); LMB held + mouse move = drag the view around like a finger on the touchscreen. The stick holds its position and WASD / Q/E still fly. Keys: `tgpModeKey` (toggle), `soiHoldKey` (hold); sensitivities: `tgpSensitivity`, `cursorSensitivity` (F8). |
+| T / hold Mouse button 4 | T toggles SOI cursor mode; holding Mouse button 4 (side "back" button) flips it while held. Works with the virtual joystick on or off (turning the stick on/off doesn't cancel it; Esc/F9 do). SOI cursor mode: the mouse controls whichever MFD page is the SOI. **TGP:** FPS-style pod aiming, scaled by zoom; the pod locks into TGT mode when you start moving and re-locks when the mouse stops or SOI mode ends. **Radar / ARAD / map / TSD / other pages:** the mouse moves the page's cursor (or pans the map); when the mouse stops, the page gets "thumbstick released" so the cursor snaps to contacts. **Middle mouse:** the page's re-centre: TGP → FWD, map → reset onto the aircraft, TSD → centre on the aircraft, radar → drop lock, ARAD → deselect. **Scroll:** the page's own zoom/range buttons (TGP zoom, radar range, map zoom, TSD scale). **LMB:** thumbstick press (lock/select) on every page except the NAV map, where it sends a GPS point at the map cursor. **Head modes** (also outside SOI cursor mode): TGP in HEAD mode → LMB is the thumbstick press (lock where you look), and the mouse doesn't move the pod; radar in head boresight → LMB is the head button (leaves head mode). **TSD:** LMB click = thumbstick press (select/deselect); LMB held + mouse move = drag the view around like a finger on the touchscreen. The stick holds its position and WASD / Q/E still fly. Keys: `tgpModeKey` (toggle), `soiHoldKey` (hold); sensitivities: `tgpSensitivity`, `cursorSensitivity` (F8). |
 | F8 | Settings window (works with the mode on or off) |
 | Esc, F9 | Also switch the mode off, so FlatScreen 3's menus get a free cursor |
 
@@ -47,26 +47,54 @@ the hitbox under the cursor is outlined. Clicking presses the element the way a 
 LMB on a touchscreen and moving drags it. Both can be switched off under F8 → Cockpit screens
 (`handleScreens`, `showScreenHitbox`).
 
+## Key bindings (F8 → Bindings)
+
+A short, fixed set of keyboard bindings that apply to every aircraft:
+
+- **STICK (right controller)**: stick movement (W/S/A/D, Q/E), trigger, A (menu / weapon cycle),
+  B (second button), thumbstick left/right/up/down/press.
+- **THROTTLE (left controller)**: throttle up/down (Left Shift / Left Ctrl, speed slider), full
+  throttle, MIL power (just below the afterburner detent), zero throttle, trigger,
+  menu button, thumbstick left/right/up/down/press.
+- **ENGINE**: engine 1 (left / only), engine 2 (right), APU, main battery (on/off/toggle each). Switches
+  under a cover get the cover lifted first.
+- **AIRCRAFT**: canopy (open/close/toggle), parking brake / brake lock (on/off/toggle; toggle on `H`),
+  wheel brakes (hold, `B`), flaps (down/up one step, cycle), landing gear
+  (up/down/toggle), wing sweep, launch bar and arrestor hook (extend/retract/toggle).
+- **COMBAT**: countermeasures (hold, `X`; no helicopter combo needed), radar power (on/off/toggle), RWR (on/mute/off/cycle), master arm (on/off/toggle; on
+  lifts the switch cover), arming mode AA / AG / toggle (EF-24, the only aircraft with one), TGP zoom
+  cycle (default `~`; works in every TGP mode including HEAD, and when the TGP isn't the SOI).
+- **PILOT**: helmet visor and night vision (on/off/toggle).
+
+Aircraft controls are found by the game's own control names (e.g. "Landing Gear"); a card says
+"not in this aircraft" when the current jet doesn't have one. Opening an aircraft card marks that
+control in the cockpit with a pulsing orange ring. Keys used in more than one place show in yellow.
+
 ## Settings
 
 Press **F8** in game for a settings window with sliders for control-area size, deadzone,
 sensitivity, centre curve, auto-centre, WASD/rudder speed and overlay opacity. While it's open the control
-area is shown as a live preview, and the mouse stick is paused so you can use the cursor. Changes
-are saved when you close it.
+area is shown as a live preview, and the virtual joystick is paused so you can use the cursor.
 
 All keys can be rebound in the window's **Keybinds** section: click a binding, press the new key
 (Esc cancels, Delete/Backspace clears it).
 
-The first run writes `mousestick.json` into the game's save-data folder (the same folder as
-FlatScreen 3's `flatscreen3.xml`). The file is re-read each time you switch the mode on, so you
-can change a value, tap C twice, and try it straight away.
+Changes apply immediately and are saved (settings and key bindings) to
+`%USERPROFILE%\AppData\LocalLow\Boundless Dynamics, LLC\VTOLVR\KBMSlop\settings.json`, while the window
+is open and when it closes. That folder is outside the mod's own, so updating the mod keeps them. To
+start over, use **Reset settings to defaults** or delete the file with the game closed. The file can be
+edited by hand with the game closed; missing entries take their defaults. If it can't be read, the mod
+starts from the defaults and keeps a copy as `settings.json.bad`.
 
-| Key | Default | Meaning |
+The defaults are the field initializers in `src/VirtualJoystickSettings.cs` (slider ranges are in
+`src/SettingsWindow.cs`).
+
+| Setting | Default | Meaning |
 |---|---|---|
-| `enableOnSpawn` | `true` | Switch stick control on automatically when you enter the cockpit (once per spawn; tapping C off keeps it off until the next spawn) |
+| `enableOnSpawn` | `false` | Switch stick control on automatically when you enter the cockpit (once per spawn; tapping C off keeps it off until the next spawn) |
 | `toggleKey` / `toggleKey2` | `"C"` / `"None"` | Keys that toggle stick control (either works) |
 | `clickModeKey` | `"LeftAlt"` | Flips stick control while held (stick on while held, or clickable mode if it's already on) |
-| `tgpModeKey` / `soiHoldKey` | `"G"` / `"Mouse3"` | SOI cursor mode: toggle / flip while held (`Mouse3` = mouse button 4) |
+| `tgpModeKey` / `soiHoldKey` | `"T"` / `"Mouse3"` | SOI cursor mode: toggle / flip while held (`Mouse3` = mouse button 4) |
 | `toggleMode` | `"Tap"` | `"Tap"` toggles; `"Hold"` = active only while a toggle key is held |
 | `tapMaxSeconds` | `0.4` | A toggle-key press held longer than this doesn't toggle |
 | `sensitivity` | `1.0` | At 1.0 the dot follows the mouse pixel for pixel: half the control area of travel = full deflection |
@@ -77,15 +105,16 @@ can change a value, tap C twice, and try it straight away.
 | `circularLimit` | `false` | Round travel limit instead of square |
 | `rudderLeftKey` / `rudderRightKey` | `"Q"` / `"E"` | Unity `KeyCode` names; `""` disables |
 | `rudderRate` | `4` | How fast rudder ramps in/out |
-| `pitchDownKey` / `pitchUpKey` / `rollLeftKey` / `rollRightKey` | `W` / `S` / `A` / `D` | Keyboard stick, added on top of the mouse |
-| `keyboardRate` | `3` | How fast keyboard input ramps in while a key is held (per second) |
+| `pitchDownKey` / `pitchUpKey` / `rollLeftKey` / `rollRightKey` | `W` / `S` / `A` / `D` | Keyboard stick, added on top of the mouse. Also flies with the virtual joystick off (only while a key is held or springing back, so a real joystick still works otherwise) |
+| `keyboardRatePitch` / `keyboardRateRoll` | `3` / `3` | How fast W/S (pitch) and A/D (roll) ramp in while held (per second) |
 | `keyboardReturnRatePitch` / `keyboardReturnRateRoll` | `4.8` / `4.8` | How fast W/S (pitch) and A/D (roll) input return to centre after release (per second) |
 | `menuKey` | `"F8"` | Opens the settings window |
-| `leftMouseFiresTrigger` | `true` | LMB = stick trigger |
 | `middleMouseRecenters` | `true` | |
+| `middleHoldRecentersView` | `true` | Holding middle mouse for `middleHoldSeconds` re-centres the view (FlatScreen 3's camera reset, or the game's VR re-centre without it) |
+| `middleHoldSeconds` | `1` | How long middle mouse must be held to re-centre the view (0.2 - 2 s) |
 | `recenterOnEnable` | `true` | Stick starts centred each time you switch on |
 | `releaseKeys` | `["Escape","F9"]` | Keys that also switch the mode off |
-| `overlaySize` | `300` | Side of the square control area in px. Bigger = more mouse travel for full deflection |
+| `overlaySize` | `460` | Side of the square control area in px. Bigger = more mouse travel for full deflection |
 | `overlayOpacity` | `0.85` | Overlay opacity |
 
 ## How it works
@@ -95,8 +124,7 @@ can change a value, tap C twice, and try it straight away.
   write that value every frame, in no fixed order (the F/A-26B has a side and a centre stick, both
   active). Writing at the point where it's used is the only place that reliably wins.
   When you switch the mode off, the patch stops overriding and BYOJ / your HOTAS take over again.
-- The cockpit stick models are moved to match (`RemoteSetStick`). LMB trigger events go to the side
-  stick if there is one (the same stick BYOJ uses), otherwise the local stick nearest your camera.
+- The cockpit stick models are moved to match (`RemoteSetStick`).
 - If the game's **hardware rudder** option is on, the game takes yaw from your rudder axis and the
   Q/E rudder keys have no effect.
 - The FlatScreen 3 hookup is a runtime Harmony prefix on `FlatScreen3MonoBehaviour.GetHoveredObject`,
@@ -110,8 +138,8 @@ Requires the .NET SDK (any recent version; it targets net472 through reference-a
 dotnet build -c Release
 ```
 
-The build copies `MouseStick.dll` and `item.json` to
-`<VTOL VR>\@Mod Loader\Mods\MouseStick\`, where the mod loader picks up local mods. If the
+The build copies `VirtualJoystick.dll` and `item.json` to
+`<VTOL VR>\@Mod Loader\Mods\VirtualJoystick\`, where the mod loader picks up local mods. If the
 game isn't installed in the default Steam library, pass `-p:GameDir="X:\path\to\VTOL VR"`.
 To build without copying, pass `-p:DeployToGame=false`.
 

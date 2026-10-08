@@ -1,14 +1,15 @@
 using System;
+using System.Reflection;
 using HarmonyLib;
 
-namespace MouseStick
+namespace VirtualJoystick
 {
     // FlatScreen 3 raycasts from the cursor every frame and clicks whatever cockpit control is under it on LMB.
     // While the mouse is flying the aircraft that would flip random switches, so we suppress its hover pass.
     // FlatScreen 3 is an optional soft dependency: patched by name, at runtime, only if it is loaded.
     internal static class FlatScreenCompat
     {
-        private const string HarmonyId = "vtolmouse.mousestick.flatscreen3";
+        private const string HarmonyId = "vtolmouse.kbmslop.flatscreen3";
         private const string TypeName = "Triquetra.FlatScreen3.FlatScreen3MonoBehaviour";
 
         private static Harmony _harmony;
@@ -40,6 +41,45 @@ namespace MouseStick
             catch (Exception e)
             {
                 Log.Error("Failed to hook FlatScreen 3 hover: " + e);
+            }
+        }
+
+        // Recentre the view: FlatScreen 3's own camera reset (exactly what its Ctrl+Z calls) if it's loaded, else the
+        // game's VR recentre. Returns false (and logs why) if it couldn't.
+        public static bool RecenterView()
+        {
+            try
+            {
+                Type type = AccessTools.TypeByName(TypeName);
+                if (type == null)
+                {
+                    VRHead.ReCenter();
+                    Log.Info("View recentred (VR recentre; FlatScreen 3 not loaded)");
+                    return true;
+                }
+                object fs = AccessTools.Property(type, "instance")?.GetValue(null);
+                MethodInfo reset = AccessTools.Method(type, "ResetCameraRotation");
+                if (fs == null || reset == null)
+                {
+                    Log.Warn($"View recentre: FlatScreen 3 {(fs == null ? "instance" : "ResetCameraRotation")} not found");
+                    return false;
+                }
+                // ResetCameraRotation dereferences the eye camera; FlatScreen 3's own Ctrl+Z skips it while that's null.
+                var eye = AccessTools.Field(type, "cameraEyeGameObject")?.GetValue(fs) as UnityEngine.Object;
+                if (eye == null)
+                {
+                    Log.Warn("View recentre: FlatScreen 3 camera not set up yet");
+                    return false;
+                }
+                reset.Invoke(fs, null);
+                Log.Info("View recentred (FlatScreen 3 camera reset)");
+                return true;
+            }
+            catch (Exception e)
+            {
+                Exception inner = e is TargetInvocationException tie && tie.InnerException != null ? tie.InnerException : e;
+                Log.Warn("View recentre failed: " + inner);
+                return false;
             }
         }
 
@@ -76,7 +116,8 @@ namespace MouseStick
                 ___vrInteractables = _fsListFiltered;
             }
 
-            bool block = MouseStickBehaviour.SuppressCockpitHover || SettingsWindow.CursorOverWindow || ScreenPointer.HasHover;
+            bool block = VirtualJoystickBehaviour.SuppressCockpitHover || VirtualJoystickBehaviour.HeadModeOwnsLmb
+                || SettingsWindow.CursorOverWindow || ScreenPointer.HasHover;
             if (!block)
                 return true;
             ___targetedVRInteractable = null;

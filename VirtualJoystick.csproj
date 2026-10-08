@@ -1,8 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <AssemblyName>MouseStick</AssemblyName>
-    <RootNamespace>MouseStick</RootNamespace>
+    <AssemblyName>VirtualJoystick</AssemblyName>
+    <RootNamespace>VirtualJoystick</RootNamespace>
     <TargetFramework>net472</TargetFramework>
     <LangVersion>latest</LangVersion>
     <Nullable>disable</Nullable>
@@ -16,7 +16,7 @@
     <GameManaged>$(GameDir)\VTOLVR_Data\Managed</GameManaged>
     <LoaderManaged>$(GameDir)\Managed</LoaderManaged>
     <!-- Local mods folder the mod loader scans for item.json -->
-    <DeployDir>$(GameDir)\@Mod Loader\Mods\MouseStick</DeployDir>
+    <DeployDir>$(GameDir)\@Mod Loader\Mods\VirtualJoystick</DeployDir>
     <DeployToGame Condition="'$(DeployToGame)' == ''">true</DeployToGame>
   </PropertyGroup>
 
@@ -31,10 +31,11 @@
     <Reference Include="UnityEngine.IMGUIModule"><HintPath>$(GameManaged)\UnityEngine.IMGUIModule.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="UnityEngine.InputLegacyModule"><HintPath>$(GameManaged)\UnityEngine.InputLegacyModule.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="UnityEngine.TextRenderingModule"><HintPath>$(GameManaged)\UnityEngine.TextRenderingModule.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.JSONSerializeModule"><HintPath>$(GameManaged)\UnityEngine.JSONSerializeModule.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.AudioModule"><HintPath>$(GameManaged)\UnityEngine.AudioModule.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="UnityEngine.UI"><HintPath>$(GameManaged)\UnityEngine.UI.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="Unity.TextMeshPro"><HintPath>$(GameManaged)\Unity.TextMeshPro.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="UnityEngine.UIModule"><HintPath>$(GameManaged)\UnityEngine.UIModule.dll</HintPath><Private>false</Private></Reference>
-    <Reference Include="UnityEngine.JSONSerializeModule"><HintPath>$(GameManaged)\UnityEngine.JSONSerializeModule.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="ModLoader.Framework"><HintPath>$(LoaderManaged)\ModLoader.Framework.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="0Harmony"><HintPath>$(LoaderManaged)\0Harmony.dll</HintPath><Private>false</Private></Reference>
   </ItemGroup>
@@ -46,8 +47,8 @@
 
   <Target Name="DeployMod" AfterTargets="Build" Condition="'$(DeployToGame)' == 'true' And Exists('$(GameDir)\VTOLVR.exe')">
     <MakeDir Directories="$(DeployDir)" />
-    <Copy SourceFiles="$(TargetDir)MouseStick.dll;$(TargetDir)MouseStick.pdb;$(TargetDir)item.json" DestinationFolder="$(DeployDir)" />
-    <Message Importance="high" Text="MouseStick deployed to $(DeployDir)" />
+    <Copy SourceFiles="$(TargetDir)VirtualJoystick.dll;$(TargetDir)VirtualJoystick.pdb;$(TargetDir)item.json" DestinationFolder="$(DeployDir)" />
+    <Message Importance="high" Text="VirtualJoystick deployed to $(DeployDir)" />
   </Target>
 
 </Project>

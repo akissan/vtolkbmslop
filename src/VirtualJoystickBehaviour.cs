@@ -6,12 +6,12 @@ using UnityEngine;
 using UnityEngine.SceneManagement;
 using VTOLVR.Multiplayer;
 
-namespace MouseStick
+namespace VirtualJoystick
 {
     // The flight-control value itself is injected by VehicleInputPatch. This component reads the mouse,
     // draws the overlay, and moves the cockpit stick models to match (late, after BYOJ / VRJoystick Update).
     [DefaultExecutionOrder(10000)]
-    public class MouseStickBehaviour : MonoBehaviour
+    public class VirtualJoystickBehaviour : MonoBehaviour
     {
         private const float ToastSeconds = 1.6f;
 
@@ -19,21 +19,26 @@ namespace MouseStick
             AccessTools.FieldRefAccess<VRJoystick, bool>("remoteOnly");
 
         public static bool IsActive { get; private set; }
-        // Mouse stick on, but Left Alt held: cursor is free for cockpit clicks, keyboard still flies.
+        // Virtual joystick on, but Left Alt held: cursor is free for cockpit clicks, keyboard still flies.
         public static bool ClickMode { get; private set; }
         // FlatScreen 3 hover/click is suppressed while the mouse is flying the aircraft or driving an SOI page.
         public static bool SuppressCockpitHover => (IsActive && !ClickMode) || SoiMode;
-        // Mouse stick on and G held: the mouse aims the targeting pod; keyboard still flies, LMB still fires.
-        // G mode: the mouse is the cursor of the SOI MFD page (TGP aiming, radar/ARAD/map cursor), scroll zooms it.
+
+        // Stick off, free look in a head mode (or a head-mode press still held): LMB isn't a cockpit click.
+        public static bool HeadModeOwnsLmb =>
+            !IsActive && (Cockpit.SoiKeys.HeadLmbActive || (Input.GetMouseButton(1) && Cockpit.SoiKeys.InHeadMode));
+                // SOI cursor mode: the mouse is the cursor of the SOI MFD page (TGP aiming, radar/ARAD/map cursor), scroll zooms it.
         public static bool SoiMode { get; private set; }
 
         private readonly SoiCursor _soi = new SoiCursor();
-        private static MouseStickBehaviour _instance;
+        private static VirtualJoystickBehaviour _instance;
 
         public static void ShowToastStatic(string text) => _instance?.ShowToast(text);
         // Pitch, yaw, roll in VRJoystick convention; read by VehicleInputPatch.
         public static Vector3 Output { get; private set; }
         public static VehicleInputManager TargetInputManager { get; private set; }
+        // Virtual joystick off, but WASD / rudder keys are flying the aircraft (Output holds the keyboard-only value).
+        public static bool KeyboardFlying { get; private set; }
 
         // Primary stick: receives trigger events. All local sticks get the deflection for animation.
         private VRJoystick _stick;
@@ -47,7 +52,6 @@ namespace MouseStick
             get => Output;
             set => Output = value;
         }
-        private bool _triggerHeld;
         private bool _freeLook;
         private bool _skipNextDelta;
 
@@ -70,7 +74,7 @@ namespace MouseStick
         private KeyCode _tgpKey;
         private KeyCode _toggleKey, _toggleKey2;
         private KeyCode _soiHoldKey;
-        private bool _soiToggled;      // SOI mode latched on by the toggle key (G)
+        private bool _soiToggled;      // SOI mode latched on by the toggle key (T)
         private bool _holdActivated;   // stick control was switched on by holding the hold key (Left Alt)
         private KeyCode[] _releaseKeys = new KeyCode[0];
 
@@ -83,32 +87,34 @@ namespace MouseStick
         private Texture2D _dot;
         private GUIStyle _labelStyle;
 
-        private static MouseStickSettings S => MouseStickSettings.Current;
+        private static VirtualJoystickSettings S => VirtualJoystickSettings.Current;
 
         private void Awake()
         {
             _instance = this;
             SceneManager.activeSceneChanged += OnSceneChanged;
+            if (S.openWindowOnStart)
+                SettingsWindow.Open();
             ParseKeys();
         }
 
         private void ParseKeys()
         {
-            _rudderLeft = MouseStickSettings.ParseKey(S.rudderLeftKey);
-            _rudderRight = MouseStickSettings.ParseKey(S.rudderRightKey);
-            _pitchDown = MouseStickSettings.ParseKey(S.pitchDownKey);
-            _pitchUp = MouseStickSettings.ParseKey(S.pitchUpKey);
-            _rollLeft = MouseStickSettings.ParseKey(S.rollLeftKey);
-            _rollRight = MouseStickSettings.ParseKey(S.rollRightKey);
-            _menuKey = MouseStickSettings.ParseKey(S.menuKey);
-            _clickKey = MouseStickSettings.ParseKey(S.clickModeKey);
-            _tgpKey = MouseStickSettings.ParseKey(S.tgpModeKey);
-            _toggleKey = MouseStickSettings.ParseKey(S.toggleKey);
-            _toggleKey2 = MouseStickSettings.ParseKey(S.toggleKey2);
-            _soiHoldKey = MouseStickSettings.ParseKey(S.soiHoldKey);
+            _rudderLeft = VirtualJoystickSettings.ParseKey(S.rudderLeftKey);
+            _rudderRight = VirtualJoystickSettings.ParseKey(S.rudderRightKey);
+            _pitchDown = VirtualJoystickSettings.ParseKey(S.pitchDownKey);
+            _pitchUp = VirtualJoystickSettings.ParseKey(S.pitchUpKey);
+            _rollLeft = VirtualJoystickSettings.ParseKey(S.rollLeftKey);
+            _rollRight = VirtualJoystickSettings.ParseKey(S.rollRightKey);
+            _menuKey = VirtualJoystickSettings.ParseKey(S.menuKey);
+            _clickKey = VirtualJoystickSettings.ParseKey(S.clickModeKey);
+            _tgpKey = VirtualJoystickSettings.ParseKey(S.tgpModeKey);
+            _toggleKey = VirtualJoystickSettings.ParseKey(S.toggleKey);
+            _toggleKey2 = VirtualJoystickSettings.ParseKey(S.toggleKey2);
+            _soiHoldKey = VirtualJoystickSettings.ParseKey(S.soiHoldKey);
             _releaseKeys = new KeyCode[S.releaseKeys.Length];
             for (int i = 0; i < _releaseKeys.Length; i++)
-                _releaseKeys[i] = MouseStickSettings.ParseKey(S.releaseKeys[i]);
+                _releaseKeys[i] = VirtualJoystickSettings.ParseKey(S.releaseKeys[i]);
         }
 
         private static bool IsHeld(KeyCode k) => k != KeyCode.None && Input.GetKey(k);
@@ -117,8 +123,11 @@ namespace MouseStick
         private static float KeyAxis(KeyCode positive, KeyCode negative) =>
             (positive != KeyCode.None && Input.GetKey(positive) ? 1f : 0f) - (negative != KeyCode.None && Input.GetKey(negative) ? 1f : 0f);
 
+        private void OnApplicationQuit() => VirtualJoystickSettings.SaveIfChanged();
+
         private void OnDestroy()
         {
+            VirtualJoystickSettings.SaveIfChanged();
             SceneManager.activeSceneChanged -= OnSceneChanged;
             Deactivate(silent: true);
             if (_white != null) Destroy(_white);
@@ -128,11 +137,15 @@ namespace MouseStick
         private void OnSceneChanged(Scene from, Scene to)
         {
             Deactivate(silent: true);
+            KeyboardFlying = false;
+            _keyboard = Vector2.zero;
+            _yaw = 0f;
             if (SoiMode)
                 EndSoiWithStickOff();
             _soiToggled = false;
             SettingsWindow.Close();
             ScreenPointer.Reset();
+            Cockpit.KeyActions.Reset();
             _stick = null;
         }
 
@@ -153,8 +166,58 @@ namespace MouseStick
 
         // ---------------------------------------------------------------- input
 
+        // Middle mouse held for middleHoldSeconds recentres the view (once per hold), in every mode: stick on or off, SOI cursor,
+        // clickable, free look, settings window. A short press keeps its normal job (stick / SOI page re-centre), but
+        // while the hold is enabled that job fires on release, so a hold doesn't also snap the stick or unlock the radar.
+        private float _middleDownAt = -1f;
+        private bool _middleFired;
+        // This frame's short middle press: release of a press that didn't reach the hold (or press-down with the hold off).
+        private bool _middleShortPress;
+
+        private void HandleViewRecenter()
+        {
+            _middleShortPress = false;
+            if (!S.middleHoldRecentersView)
+            {
+                _middleDownAt = -1f;
+                _middleFired = false;
+                _middleShortPress = Input.GetMouseButtonDown(2);
+                return;
+            }
+
+            bool held = Input.GetMouseButton(2) || (Application.isFocused && Win32Mouse.MiddleHeld);
+            if (!held)
+            {
+                _middleShortPress = _middleDownAt >= 0f && !_middleFired;
+                _middleDownAt = -1f;
+                _middleFired = false;
+                return;
+            }
+            // Timed from the first frame seen held, so a press that began while this wasn't running still counts.
+            if (_middleDownAt < 0f)
+                _middleDownAt = Time.unscaledTime;
+            if (!_middleFired && Time.unscaledTime - _middleDownAt >= Mathf.Clamp(S.middleHoldSeconds, 0.2f, 2f))
+            {
+                _middleFired = true; // once per hold
+                ShowToast(FlatScreenCompat.RecenterView() ? "View recentred" : "View recentre failed (see log)");
+            }
+        }
+
+        // Settings only change through the settings window: while it's open, save changes about once a second (closing
+        // it saves too), so a crash loses at most a second of tweaking.
+        private const float SettingsSaveInterval = 1f;
+        private float _nextSettingsSave;
+
         private void Update()
         {
+            if (SettingsWindow.IsOpen && Time.unscaledTime >= _nextSettingsSave)
+            {
+                _nextSettingsSave = Time.unscaledTime + SettingsSaveInterval;
+                VirtualJoystickSettings.SaveIfChanged();
+            }
+
+            HandleViewRecenter();
+
             // Rebinding a key in the settings window: swallow input so the mod's own shortcuts don't fire.
             if (SettingsWindow.UpdateKeyCapture())
                 return;
@@ -168,18 +231,27 @@ namespace MouseStick
             HandleToggleKey();
             HandleAutoEnable();
 
+            // Keyboard bindings (Bindings tab): controller buttons and aircraft controls, with the stick on or off.
+            Cockpit.KeyActions.Update(GetPlayerVehicle(), inputAllowed: !SettingsWindow.IsCapturingKey);
+
+            // Stick off, outside SOI mode, in FlatScreen 3's free look (RMB held): LMB is still the head-mode action
+            // (TGP HEAD lock / radar head button). With the free cursor (no RMB) LMB stays a cockpit click.
+            if (!IsActive && !SoiMode)
+                Cockpit.SoiKeys.HeadModeLmb(!SettingsWindow.IsOpen && Input.GetMouseButton(1) && Input.GetMouseButton(0));
+
             // Cockpit screens (MFD buttons, touchscreens) are clicked through ScreenPointer whenever the free cursor is in
             // use: stick off, or clickable mode. The FlatScreen 3 hook that hands them over is installed up front.
             if (ScreenPointer.Available)
             {
                 FlatScreenCompat.TryPatch();
-                bool freeCursor = !SuppressCockpitHover && !SettingsWindow.CursorOverWindow && !SoiMode;
+                bool freeCursor = !SuppressCockpitHover && !SettingsWindow.CursorOverWindow && !SoiMode && !HeadModeOwnsLmb;
                 ScreenPointer.Update(S.handleScreens, freeCursor, GetPlayerVehicle());
             }
 
             if (!IsActive)
             {
                 UpdateSoiWithStickOff();
+                UpdateKeyboardWithStickOff();
                 return;
             }
 
@@ -195,7 +267,7 @@ namespace MouseStick
             }
 
             // Settings window open, or clickable mode (hold Left Alt while the stick is on): hand the cursor back so the
-            // window / cockpit can be used, and freeze the mouse stick. WASD and rudder keep flying the aircraft.
+            // window / cockpit can be used, and freeze the virtual joystick. WASD and rudder keep flying the aircraft.
             // If Alt itself switched the stick on (it was off), holding it means "stick on", not clickable mode.
             bool menuOpen = SettingsWindow.IsOpen;
             bool wasClickMode = ClickMode;
@@ -208,15 +280,21 @@ namespace MouseStick
                 _skipNextDelta = true;
             }
 
+            if (GetPlayerVehicle() == null)
+            {
+                Deactivate(silent: true);
+                ShowToast("Virtual joystick OFF (aircraft lost)");
+                return;
+            }
             if (!EnsureStick())
             {
                 Deactivate();
-                ShowToast("Mouse stick OFF (no stick)");
+                ShowToast("Virtual joystick OFF (no stick)");
                 return;
             }
 
             // SOI mode: the mouse is the cursor of the SOI page instead of flying. Cursor stays captured, WASD keeps
-            // flying. G toggles it; Mouse button 4 flips it while held. Clickable mode and the menu take priority.
+            // flying. T toggles it; Mouse button 4 flips it while held. Clickable mode and the menu take priority.
             if (!menuOpen && !ClickMode && IsDown(_tgpKey))
                 _soiToggled = !_soiToggled;
             bool wasSoiMode = SoiMode;
@@ -241,6 +319,9 @@ namespace MouseStick
             _unityTravel += Mathf.Abs(Input.GetAxisRaw("Mouse X")) + Mathf.Abs(Input.GetAxisRaw("Mouse Y"));
 
             bool lmb = !menuOpen && !ClickMode && Input.GetMouseButton(0);
+            // TGP HEAD mode / radar head boresight: LMB is the page's head action (TGP lock / radar BORE).
+            if (Cockpit.SoiKeys.HeadModeLmb(lmb))
+                lmb = false;
 
             Vector2 delta = Vector2.zero;
             if (Application.isFocused && !_freeLook && !menuOpen && !ClickMode)
@@ -271,14 +352,14 @@ namespace MouseStick
                 if (scroll > 0f) _soi.Zoom(+1);
                 else if (scroll < 0f) _soi.Zoom(-1);
                 // Middle mouse: the page's re-centre (TGP FWD, map reset, TSD centre, radar unlock, ARAD deselect).
-                if (Input.GetMouseButtonDown(2))
+                if (_middleShortPress)
                     _soi.Recenter();
             }
 
             if (S.autoCenterRate > 0f && delta == Vector2.zero)
                 _virtualPos = Vector2.MoveTowards(_virtualPos, Vector2.zero, S.autoCenterRate * dt);
 
-            if (S.middleMouseRecenters && !ClickMode && !SoiMode && Input.GetMouseButtonDown(2))
+            if (S.middleMouseRecenters && !ClickMode && !SoiMode && _middleShortPress)
                 _virtualPos = Vector2.zero;
 
             if (S.circularLimit)
@@ -286,33 +367,103 @@ namespace MouseStick
             else
                 _virtualPos = new Vector2(Mathf.Clamp(_virtualPos.x, -1f, 1f), Mathf.Clamp(_virtualPos.y, -1f, 1f));
 
+            UpdateKeyboardAxes(dt);
+            ApplyStickPos(CombineMouseAndKeyboard(_virtualPos, _keyboard));
+
+            // Normal flight: LMB is the SOI thumbstick press (radar lock etc.). In SOI mode the page handles it (SoiCursor).
+            Cockpit.SoiKeys.LmbSelect(!SoiMode && lmb);
+        }
+
+        // Rudder keys -> _yaw; WASD -> _keyboard (in mouse space).
+        private void UpdateKeyboardAxes(float dt)
+        {
             _yaw = Mathf.MoveTowards(_yaw, KeyAxis(_rudderRight, _rudderLeft), S.rudderRate * dt);
 
             // WASD springs back to centre on release. W is always stick forward (nose down), whatever invertPitch
-            // does to the mouse, so it is converted into mouse space here and back out by the same sign below.
+            // does to the mouse, so it is converted into mouse space here and back out by the same sign in ApplyStickPos.
             float inv = S.invertPitch ? -1f : 1f;
             Vector2 kbTarget = new Vector2(KeyAxis(_rollRight, _rollLeft), KeyAxis(_pitchDown, _pitchUp) * inv);
-            // Per axis: a held key ramps at keyboardRate; with no key, the axis drifts back to centre at its own return
-            // rate (x = roll, A/D; y = pitch, W/S).
-            _keyboard.x = Mathf.MoveTowards(_keyboard.x, kbTarget.x, (kbTarget.x != 0f ? S.keyboardRate : S.keyboardReturnRateRoll) * dt);
-            _keyboard.y = Mathf.MoveTowards(_keyboard.y, kbTarget.y, (kbTarget.y != 0f ? S.keyboardRate : S.keyboardReturnRatePitch) * dt);
-
-            _stickPos = _virtualPos + _keyboard;
-            _stickPos = S.circularLimit
-                ? Vector2.ClampMagnitude(_stickPos, 1f)
-                : new Vector2(Mathf.Clamp(_stickPos.x, -1f, 1f), Mathf.Clamp(_stickPos.y, -1f, 1f));
-
-            // VRJoystick axes: x = pitch (+ = stick forward / nose down), y = yaw (+ = right), z = roll (+ = left).
-            Vector2 shaped = Shape(_stickPos);
-            _output = new Vector3(shaped.y * inv, _yaw, -shaped.x);
-
-            // On radar / ARAD / TSD in SOI mode, LMB belongs to the page (handled in SoiCursor), not the trigger.
-            bool lmbIsSoiButton = SoiMode && _soi.LmbIsThumbstickPress;
-            if (S.leftMouseFiresTrigger)
-                SetTrigger(!lmbIsSoiButton && lmb);
+            // Per axis (x = roll, A/D; y = pitch, W/S): a held key ramps at that axis' speed; with no key, the axis drifts
+            // back to centre at its own return rate.
+            _keyboard.x = Mathf.MoveTowards(_keyboard.x, kbTarget.x, (kbTarget.x != 0f ? S.keyboardRateRoll : S.keyboardReturnRateRoll) * dt);
+            _keyboard.y = Mathf.MoveTowards(_keyboard.y, kbTarget.y, (kbTarget.y != 0f ? S.keyboardRatePitch : S.keyboardReturnRatePitch) * dt);
         }
 
-        // SOI cursor mode while the mouse stick is off: same keys and behaviour as with the stick on (G toggles,
+        // Mouse + WASD. Per axis, the keyboard moves the stick from the mouse position toward the key's end stop, so full
+        // key input is always full deflection that way, even with the mouse held at the opposite edge (free look,
+        // clickable mode and SOI mode freeze the mouse). With the mouse centred this is the same as plain addition.
+        private Vector2 CombineMouseAndKeyboard(Vector2 mouse, Vector2 kb)
+        {
+            Vector2 p = new Vector2(
+                Mathf.Lerp(mouse.x, Mathf.Sign(kb.x), Mathf.Abs(kb.x)),
+                Mathf.Lerp(mouse.y, Mathf.Sign(kb.y), Mathf.Abs(kb.y)));
+            if (!S.circularLimit || p.sqrMagnitude <= 1f)
+                return p;
+
+            // Circular limit: the axis the keyboard drives harder keeps its deflection and the other gives way, so e.g.
+            // full W still reaches full pitch with the mouse parked at full roll. Ties fall to ClampMagnitude.
+            float ax = Mathf.Abs(kb.x), ay = Mathf.Abs(kb.y);
+            if (ax > ay)
+                p.y = Mathf.Sign(p.y) * Mathf.Min(Mathf.Abs(p.y), Mathf.Sqrt(Mathf.Max(0f, 1f - p.x * p.x)));
+            else if (ay > ax)
+                p.x = Mathf.Sign(p.x) * Mathf.Min(Mathf.Abs(p.x), Mathf.Sqrt(Mathf.Max(0f, 1f - p.y * p.y)));
+            return p;
+        }
+
+        // Clamps the combined stick position, shapes it and stores the flight-control output.
+        private void ApplyStickPos(Vector2 pos)
+        {
+            _stickPos = S.circularLimit
+                ? Vector2.ClampMagnitude(pos, 1f)
+                : new Vector2(Mathf.Clamp(pos.x, -1f, 1f), Mathf.Clamp(pos.y, -1f, 1f));
+
+            // VRJoystick axes: x = pitch (+ = stick forward / nose down), y = yaw (+ = right), z = roll (+ = left).
+            float inv = S.invertPitch ? -1f : 1f;
+            Vector2 shaped = Shape(_stickPos);
+            _output = new Vector3(shaped.y * inv, _yaw, -shaped.x);
+        }
+
+        // WASD and rudder keys with the virtual joystick off. The flight controls are only overridden while a key is
+        // held or an axis is still springing back, so a real joystick (BYOJ) keeps flying the rest of the time.
+        private void UpdateKeyboardWithStickOff()
+        {
+            if (GetPlayerVehicle() == null)
+            {
+                EndKeyboardFlying();
+                return;
+            }
+
+            UpdateKeyboardAxes(Time.unscaledDeltaTime);
+            bool inUse = _keyboard.sqrMagnitude > 1e-8f || Mathf.Abs(_yaw) > 1e-4f;
+            if (!inUse)
+            {
+                EndKeyboardFlying();
+                return;
+            }
+            if (!KeyboardFlying)
+            {
+                // Find this aircraft's input manager / sticks (the cached ones may be from an earlier session).
+                FindPlayerControls();
+                if (TargetInputManager == null && _sticks.Count == 0)
+                    return;
+                KeyboardFlying = true;
+            }
+            ApplyStickPos(_keyboard);
+        }
+
+        private void EndKeyboardFlying()
+        {
+            if (!KeyboardFlying)
+                return;
+            KeyboardFlying = false;
+            _keyboard = Vector2.zero;
+            _yaw = 0f;
+            _output = Vector3.zero;
+            // Let go of the stick rather than leaving the last deflection held.
+            ApplyStickVisual(Vector3.zero);
+        }
+
+        // SOI cursor mode while the virtual joystick is off: same keys and behaviour as with the stick on (T toggles,
         // Mouse button 4 flips while held, Esc leaves it), with the cursor captured only while the mode is on.
         private void UpdateSoiWithStickOff()
         {
@@ -336,7 +487,7 @@ namespace MouseStick
             if (want && !SoiMode)
             {
                 SoiMode = true;
-                FindPlayerControls(); // trigger stick, so LMB can still fire on TGP / map pages
+                FindPlayerControls();
                 _soi.Begin(vehicle);
                 if (_soi.Current == SoiCursor.Kind.None)
                     ShowToast("No SOI page selected");
@@ -352,6 +503,8 @@ namespace MouseStick
                 return;
 
             bool lmb = Input.GetMouseButton(0);
+            if (Cockpit.SoiKeys.HeadModeLmb(lmb))
+                lmb = false;
             bool wasFreeLook = _freeLook;
             _freeLook = Input.GetMouseButton(1);
 
@@ -373,18 +526,15 @@ namespace MouseStick
             float scroll = Input.mouseScrollDelta.y;
             if (scroll > 0f) _soi.Zoom(+1);
             else if (scroll < 0f) _soi.Zoom(-1);
-            if (Input.GetMouseButtonDown(2))
+            if (_middleShortPress)
                 _soi.Recenter();
 
-            if (S.leftMouseFiresTrigger)
-                SetTrigger(!_soi.LmbIsThumbstickPress && lmb);
         }
 
         private void EndSoiWithStickOff()
         {
             SoiMode = false;
             _soi.End();
-            SetTrigger(false);
             Win32Mouse.Release();
             Cursor.visible = true;
         }
@@ -405,13 +555,13 @@ namespace MouseStick
 
         private void LateUpdate()
         {
+            if (!IsActive && KeyboardFlying)
+                ApplyStickVisual(_output);
             if (!IsActive && SoiMode)
             {
                 // SOI mode with the stick off: keep the captured cursor hidden (FlatScreen 3 re-shows it on movement).
                 if (!_freeLook && !SettingsWindow.IsOpen)
                     Cursor.visible = false;
-                if (_triggerHeld && _stick != null)
-                    _stick.OnTriggerAxis?.Invoke(1f);
                 return;
             }
             if (!IsActive || _stick == null)
@@ -422,8 +572,6 @@ namespace MouseStick
                 Cursor.visible = false;
 
             ApplyStickVisual(_output);
-            if (_triggerHeld)
-                _stick.OnTriggerAxis?.Invoke(1f);
         }
 
         private void HandleToggleKey()
@@ -560,15 +708,12 @@ namespace MouseStick
 
         private void Activate()
         {
-            // Keep unsaved changes from the settings window, then pick up any hand edits to the file.
-            MouseStickSettings.SaveIfDirty();
-            MouseStickSettings.Load();
             ParseKeys();
 
             _stick = null;
             if (!EnsureStick())
             {
-                ShowToast("Mouse stick: no flyable stick in this seat");
+                ShowToast("Virtual joystick: no flyable stick in this seat");
                 return;
             }
 
@@ -579,7 +724,10 @@ namespace MouseStick
                 _virtualPos = Vector2.zero;
                 _yaw = 0f;
             }
-            _keyboard = Vector2.zero;
+            // Keyboard input already flying (stick was off) carries straight over instead of snapping to centre.
+            if (!KeyboardFlying)
+                _keyboard = Vector2.zero;
+            KeyboardFlying = false;
             _stickPos = _virtualPos;
             _output = Vector3.zero;
 
@@ -598,7 +746,7 @@ namespace MouseStick
             if (!Win32Mouse.Capture())
                 Log.Warn("Could not find the game window to capture the mouse");
             _skipNextDelta = true;
-            ShowToast("Mouse stick ON");
+            ShowToast("Virtual joystick ON");
             Log.Info($"Activated. Trigger stick: {PathOf(_stick.transform)}; {_sticks.Count} stick(s) animated; " +
                      $"input manager: {(TargetInputManager != null ? PathOf(TargetInputManager.transform) : "NONE (falling back to stick events)")}");
         }
@@ -618,7 +766,7 @@ namespace MouseStick
                 _soi.End();
             }
 
-            SetTrigger(false);
+            Cockpit.SoiKeys.LmbSelect(false);
             // Let go of the stick rather than leaving the last deflection held.
             ApplyStickVisual(Vector3.zero);
             foreach (var kv in _savedReturnToZero)
@@ -628,13 +776,16 @@ namespace MouseStick
             }
             _savedReturnToZero.Clear();
             _output = Vector3.zero;
+            // Keys still held pick up from centre with the stick off (UpdateKeyboardWithStickOff).
+            _keyboard = Vector2.zero;
+            _yaw = 0f;
 
             Win32Mouse.Release();
             Cursor.lockState = CursorLockMode.None;
             Cursor.visible = true;
             Log.Info($"Deactivated. Mouse travel this session: win32 {_win32Travel:0} px, unity axes {_unityTravel:0.0}");
             if (!silent)
-                ShowToast("Mouse stick OFF");
+                ShowToast("Virtual joystick OFF");
         }
 
         private bool EnsureStick()
@@ -695,17 +846,46 @@ namespace MouseStick
             return path;
         }
 
+        // The aircraft the player is flying, or null when there is none to fly: not spawned, destroyed, or ejected from.
+        // A wreck counting as "no aircraft" switches the stick off on death and lets auto-enable fire again on respawn.
         private static GameObject GetPlayerVehicle()
         {
+            GameObject vehicle = null;
+            var fsm = FlightSceneManager.instance;
             if (VTOLMPUtils.IsMultiplayer())
             {
                 var info = VTOLMPLobbyManager.localPlayerInfo;
                 if (info != null && info.vehicleObject != null)
-                    return info.vehicleObject;
+                    vehicle = info.vehicleObject;
             }
-            var fsm = FlightSceneManager.instance;
-            return fsm != null && fsm.playerActor != null ? fsm.playerActor.gameObject : null;
+            if (vehicle == null && fsm != null && fsm.playerActor != null)
+                vehicle = fsm.playerActor.gameObject;
+            if (vehicle == null)
+                return null;
+
+            Actor actor = vehicle.GetComponent<Actor>();
+            if (actor != null && !actor.alive)
+                return null;
+
+            // playerHasEjected stays set for the rest of the scene (even across a multiplayer respawn), so remember
+            // which aircraft it was set in and only write that one off.
+            if (fsm != _ejectFsm)
+            {
+                _ejectFsm = fsm;
+                _ejectLatched = false;
+                _ejectedFrom = null;
+            }
+            if (fsm != null && fsm.playerHasEjected && !_ejectLatched)
+            {
+                _ejectLatched = true;
+                _ejectedFrom = vehicle;
+            }
+            return _ejectLatched && vehicle == _ejectedFrom ? null : vehicle;
         }
+
+        private static FlightSceneManager _ejectFsm;
+        private static bool _ejectLatched;
+        private static GameObject _ejectedFrom;
 
         // VRJoystick poses its model from its stick value in its own Update, and BYOJoystick overwrites that value
         // every Update too (with the physical stick, usually centred), so the model showed BYOJ's stick, not ours.
@@ -717,7 +897,7 @@ namespace MouseStick
         // are only sent here when there is no VehicleInputManager to patch (or to centre the stick on release).
         private void ApplyStickVisual(Vector3 pyr)
         {
-            bool sendEvents = TargetInputManager == null || !IsActive;
+            bool sendEvents = TargetInputManager == null || !(IsActive || KeyboardFlying);
             foreach (var js in _sticks)
             {
                 if (js == null)
@@ -751,25 +931,6 @@ namespace MouseStick
             }
         }
 
-        private void SetTrigger(bool down)
-        {
-            if (down == _triggerHeld)
-                return;
-            _triggerHeld = down;
-            if (_stick == null)
-                return;
-            if (down)
-            {
-                _stick.OnTriggerDown?.Invoke();
-                _stick.OnTriggerAxis?.Invoke(1f);
-            }
-            else
-            {
-                _stick.OnTriggerAxis?.Invoke(0f);
-                _stick.OnTriggerUp?.Invoke();
-            }
-        }
-
         private void ShowToast(string text)
         {
             _toast = text;
@@ -787,11 +948,29 @@ namespace MouseStick
             EnsureGuiResources();
 
             if (ClickMode)
-                DrawClickModeOverlay(null);
-            else if (SoiMode)
-                DrawClickModeOverlay(_soi.Label);
+                DrawClickModeOverlay();
             else if (IsActive || SettingsWindow.IsOpen)
                 DrawStickOverlay();
+            else if (SoiMode)
+                // SOI mode with the stick off: no stick to show, just the title where the stick overlay puts it.
+                DrawOverlayTitle(SoiTitle);
+
+            // Bindings tab: mark the cockpit controls whose cards are open, so you can see which switch is which.
+            if (SettingsWindow.IsOpen)
+            {
+                float pulse = 0.6f + 0.4f * Mathf.Sin(Time.unscaledTime * 6f);
+                foreach (var world in SettingsWindow.HighlightPositions)
+                {
+                    if (!ScreenPointer.WorldToGui(world, out Vector2 g))
+                        continue;
+                    var mark = new Color(1f, 0.55f, 0.15f, pulse);
+                    DrawRing(g, 14f, mark, 2.5f);
+                    DrawLine(g + new Vector2(-24f, 0f), g + new Vector2(-16f, 0f), 2f, mark);
+                    DrawLine(g + new Vector2(16f, 0f), g + new Vector2(24f, 0f), 2f, mark);
+                    DrawLine(g + new Vector2(0f, -24f), g + new Vector2(0f, -16f), 2f, mark);
+                    DrawLine(g + new Vector2(0f, 16f), g + new Vector2(0f, 24f), 2f, mark);
+                }
+            }
 
             // Outline of the screen element under the cursor: the real hitbox ScreenPointer will press.
             if (S.showScreenHitbox && ScreenPointer.TryGetHoverOutline(_outline))
@@ -809,14 +988,15 @@ namespace MouseStick
 
             if (_toast != null && Time.unscaledTime < _toastUntil)
             {
+                // Same style as the overlay title (no "* "), on the line above it; fades out over its last 0.4 s.
                 float alpha = Mathf.Clamp01((_toastUntil - Time.unscaledTime) / 0.4f);
-                DrawLabel(new Rect(0f, Screen.height * 0.12f, Screen.width, 24f), _toast, new Color(1f, 1f, 1f, alpha));
+                DrawLabel(TitleLine(1), _toast.ToUpperInvariant(), new Color(TitleColor.r, TitleColor.g, TitleColor.b, alpha));
             }
         }
 
-        // Clickable / TGP mode: no box or bars, just a small dot on a faint line from centre to the actual stick
-        // position (plus an optional small label), so it stays out of the way. Opacity is its own setting.
-        private void DrawClickModeOverlay(string label)
+        // Clickable mode: no box or bars, just a small dot on a faint line from centre to the actual stick
+        // position, so it stays out of the way. Opacity is its own setting.
+        private void DrawClickModeOverlay()
         {
             float a = S.clickModeOpacity;
             if (a <= 0f)
@@ -824,21 +1004,35 @@ namespace MouseStick
             float half = S.overlaySize * 0.5f;
             Vector2 c = new Vector2(Screen.width * 0.5f, Screen.height * 0.5f);
 
-            // Stick dot only while the mouse stick is on (SOI mode can run with it off).
-            if (IsActive)
-            {
-                Vector2 p = new Vector2(c.x + _stickPos.x * half, c.y - _stickPos.y * half);
-                Color color = SettingsWindow.IsOpen && _stickPos.magnitude <= S.deadzone ? new Color(1f, 0.85f, 0.3f, a) : new Color(0.55f, 1f, 0.6f, a);
-                DrawLine(c, p, 1.5f, new Color(color.r, color.g, color.b, a * 0.5f));
-                float r = 4f;
-                GUI.color = color;
-                GUI.DrawTexture(new Rect(p.x - r, p.y - r, r * 2f, r * 2f), _dot);
-                GUI.color = Color.white;
-            }
-
-            if (label != null)
-                DrawLabel(new Rect(c.x - 60f, c.y + 14f, 120f, 18f), label, new Color(1f, 1f, 1f, a));
+            Vector2 p = new Vector2(c.x + _stickPos.x * half, c.y - _stickPos.y * half);
+            bool inDz = _stickPos.magnitude <= S.deadzone;
+            Color color = SettingsWindow.IsOpen && inDz ? new Color(1f, 0.85f, 0.3f, a) : new Color(0.55f, 1f, 0.6f, a);
+            if (inDz)
+                color.a *= 0.5f; // 50% more transparent inside the deadzone
+            DrawLine(c, p, 1.5f, new Color(color.r, color.g, color.b, a * 0.5f));
+            float r = 4f;
+            GUI.color = color;
+            GUI.DrawTexture(new Rect(p.x - r, p.y - r, r * 2f, r * 2f), _dot);
+            GUI.color = Color.white;
         }
+
+        // Free look and SOI cursor mode: the mouse isn't flying, so the stick overlay goes grey and fainter.
+        private bool OverlayPassive => _freeLook || SoiMode;
+        private static Color PassiveColor(float a) => new Color(0.7f, 0.7f, 0.7f, a);
+        private string SoiTitle => _soi.Label;
+
+        // Overlay title and toast messages: opaque bold green, "* " prefix.
+        private static readonly Color TitleColor = new Color(0.55f, 1f, 0.6f, 1f);
+
+        // Text line centred above the control area: 0 = overlay title, 1 = the line above it (toasts).
+        private Rect TitleLine(int line)
+        {
+            float size = S.overlaySize;
+            float top = Screen.height * 0.5f - size * 0.5f;
+            return new Rect(Screen.width * 0.5f - size * 0.5f - 100f, top - 24f - line * 20f, size + 200f, 20f);
+        }
+
+        private void DrawOverlayTitle(string title) => DrawLabel(TitleLine(0), "* " + title, TitleColor);
 
         private void DrawStickOverlay()
         {
@@ -848,7 +1042,8 @@ namespace MouseStick
             Vector2 c = new Vector2(Screen.width * 0.5f, Screen.height * 0.5f);
             Rect box = new Rect(c.x - half, c.y - half, size, size);
 
-            Color frame = _freeLook ? new Color(0.7f, 0.7f, 0.7f, a) : new Color(0.55f, 1f, 0.6f, a);
+            bool passive = OverlayPassive;
+            Color frame = passive ? PassiveColor(a) : new Color(0.55f, 1f, 0.6f, a);
             Color faint = new Color(1f, 1f, 1f, 0.18f * a);
 
             Vector2 mousePos = IsActive ? _virtualPos : Vector2.zero;
@@ -895,29 +1090,32 @@ namespace MouseStick
 
             // Colour reflects the actual stick output (deadzone yellow only while the settings window is open).
             bool inDeadzone = SettingsWindow.IsOpen && stickPos.magnitude <= S.deadzone;
-            Color dotColor = _freeLook ? new Color(0.8f, 0.8f, 0.8f, 0.6f * a)
-                : _triggerHeld ? new Color(1f, 0.3f, 0.25f, a)
+            Color dotColor = passive ? new Color(0.8f, 0.8f, 0.8f, 0.6f * a)
+                : Cockpit.KeyActions.Right.TriggerHeld ? new Color(1f, 0.3f, 0.25f, a)
                 : inDeadzone ? new Color(1f, 0.85f, 0.3f, a)
                 : new Color(0.55f, 1f, 0.6f, a);
 
             // Only the mouse dot gets a (faint) line from centre; the ring stands alone.
             DrawLine(c, pm, 1.5f, new Color(dotColor.r, dotColor.g, dotColor.b, dotColor.a * 0.35f));
 
-            float r = 5f;
-            GUI.color = showCombined ? new Color(dotColor.r, dotColor.g, dotColor.b, dotColor.a * 0.75f) : dotColor;
+            float r = S.stickDotSize;
+            // Inside the deadzone (no output) the dot is drawn 50% more transparent.
+            float dotAlpha = dotColor.a * (showCombined ? 0.75f : 1f) * (stickPos.magnitude <= S.deadzone ? 0.5f : 1f);
+            GUI.color = new Color(dotColor.r, dotColor.g, dotColor.b, dotAlpha);
             GUI.DrawTexture(new Rect(pm.x - r, pm.y - r, r * 2f, r * 2f), _dot);
             GUI.color = Color.white;
 
             if (showCombined)
-                DrawRing(ps, 7f, dotColor, 1.5f);
+                DrawRing(ps, S.stickDotSize + 2f, dotColor, 1.5f);
 
-            // Title only in non-default states; plain flying shows no text. (SOI mode draws its own page label.)
-            string title = !IsActive ? "MOUSE STICK  ·  PREVIEW"
-                : SettingsWindow.IsOpen ? "MOUSE STICK  ·  SETTINGS OPEN"
-                : _freeLook ? "MOUSE STICK  ·  FREE LOOK"
+            // Title only in non-default states; plain flying shows no text.
+            string title = !IsActive ? "PREVIEW"
+                : SettingsWindow.IsOpen ? "SETTINGS OPEN"
+                : SoiMode ? SoiTitle
+                : _freeLook ? "FREE LOOK"
                 : null;
             if (title != null)
-                DrawLabel(new Rect(box.x - 100f, box.y - 24f, size + 200f, 20f), title, new Color(frame.r, frame.g, frame.b, 0.6f * a));
+                DrawOverlayTitle(title);
         }
 
         // Travel-limit edges: hidden until the mouse is this far out, then fading up to BorderAlpha at the edge.

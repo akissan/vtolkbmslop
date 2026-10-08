@@ -3,7 +3,7 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using UnityEngine;
 
-namespace MouseStick
+namespace VirtualJoystick
 {
     // Reads mouse movement straight from Windows instead of Unity's "Mouse X/Y" axes, which gave no stick
     // movement in VTOL VR with Unity's cursor lock on. Each frame: measure how far the cursor moved from the centre
@@ -27,10 +27,16 @@ namespace MouseStick
         [DllImport("user32.dll")] private static extern bool GetClientRect(IntPtr hWnd, out RECT r);
         [DllImport("user32.dll")] private static extern bool ClientToScreen(IntPtr hWnd, ref POINT p);
 
+        [DllImport("user32.dll")] private static extern short GetAsyncKeyState(int vKey);
+        private const int VK_MBUTTON = 0x04;
+
         private static IntPtr _hwnd;
         private static bool _captured;
 
         public static bool IsCaptured => _captured;
+
+        // Middle mouse button state straight from Windows (backs up Unity's, whatever the cursor capture is doing).
+        public static bool MiddleHeld => (GetAsyncKeyState(VK_MBUTTON) & 0x8000) != 0;
 
         // Clip to the game window and centre the cursor. Returns false if the window can't be found.
         public static bool Capture()

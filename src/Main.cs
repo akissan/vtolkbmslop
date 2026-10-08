@@ -2,9 +2,9 @@ using ModLoader.Framework;
 using ModLoader.Framework.Attributes;
 using UnityEngine;
 
-namespace MouseStick
+namespace VirtualJoystick
 {
-    [ItemId("vtolmouse.mousestick")]
+    [ItemId("vtolmouse.kbmslop")]
     public class Main : VtolMod
     {
         private GameObject _host;
@@ -12,11 +12,10 @@ namespace MouseStick
         private void Awake()
         {
             Log.Info("Loading");
-            MouseStickSettings.Load();
 
-            _host = new GameObject("MouseStick");
+            _host = new GameObject("VirtualJoystick");
             DontDestroyOnLoad(_host);
-            _host.AddComponent<MouseStickBehaviour>();
+            _host.AddComponent<VirtualJoystickBehaviour>();
         }
 
         public override void UnLoad()
@@ -30,8 +29,8 @@ namespace MouseStick
 
     internal static class Log
     {
-        public static void Info(object msg) => Debug.Log("[MouseStick] " + msg);
-        public static void Warn(object msg) => Debug.LogWarning("[MouseStick] " + msg);
-        public static void Error(object msg) => Debug.LogError("[MouseStick] " + msg);
+        public static void Info(object msg) => Debug.Log("[VirtualJoystick] " + msg);
+        public static void Warn(object msg) => Debug.LogWarning("[VirtualJoystick] " + msg);
+        public static void Error(object msg) => Debug.LogError("[VirtualJoystick] " + msg);
     }
 }

@@ -3,15 +3,16 @@ using System.Reflection;
 using HarmonyLib;
 using UnityEngine;
 
-namespace MouseStick
+namespace VirtualJoystick
 {
-    // G mode: the mouse becomes the cursor of whichever MFD page is the SOI.
+    // SOI cursor mode: the mouse becomes the cursor of whichever MFD page is the SOI.
     //  - TGP: FPS-style pod aiming (TgpControl).
     //  - Radar / ARAD / map / TSD / anything else: mouse movement is turned into the page's own thumbstick input.
     //    Those pages all move their cursor at "speed * frame time * axis" with no clamp on axis, so
     //    axis = pixels * k / frameTime moves the cursor in proportion to the mouse, whatever the frame rate.
     //    When the mouse goes still the page gets its "thumbstick released", which snaps the cursor to contacts.
-    // The scroll wheel presses the page's own zoom buttons. On radar and ARAD, LMB is the thumbstick press.
+    // The scroll wheel presses the page's own zoom buttons. LMB is the page's thumbstick press (TSD: click; drag pans),
+    // except on the NAV map, where it sends a GPS point.
     internal class SoiCursor
     {
         public enum Kind { None, Tgp, Radar, Arad, Map, Tsd, Other }
@@ -38,9 +39,6 @@ namespace MouseStick
 
         public Kind Current { get; private set; }
 
-        // Pages where LMB is the thumbstick press (and so doesn't fire the gun).
-        public bool LmbIsThumbstickPress => Current == Kind.Radar || Current == Kind.Arad || Current == Kind.Tsd;
-
         // TSD: LMB click = thumbstick press, LMB drag = pan the view (the same touch events FlatScreen 3 / a VR finger use).
         private const float DragThresholdPx = 4f;
         // At cursor sensitivity 1, 400 px of mouse drags the view by one screen width.
@@ -52,6 +50,7 @@ namespace MouseStick
         private static readonly MethodInfo SetTouchingLocalPoint = AccessTools.PropertySetter(typeof(VRTouchScreenInteractable), "touchingLocalPoint");
         private static bool CanDrag => TouchBeginField != null && TouchingField != null && SetIsTouching != null && SetTouchingLocalPoint != null;
         private bool _lmbDown;
+        private bool _mapLmb; // edge state for the NAV map's GPS send
         private float _lmbTravel;
         private VRTouchScreenInteractable _dragTouch;
 
@@ -132,6 +131,7 @@ namespace MouseStick
 
             if (Current == Kind.Tgp)
             {
+                SetButton(lmb);
                 _tgp.Update(px, tgpSensitivity);
                 return;
             }
@@ -163,7 +163,17 @@ namespace MouseStick
                     return;
                 }
             }
-            else if (LmbIsThumbstickPress)
+            else if (Current == Kind.Map)
+            {
+                // GPS SEND: one GPS point at the map cursor per click.
+                if (lmb && !_mapLmb && _target is DashMapDisplay map)
+                {
+                    try { map.SendGPSTarget(); }
+                    catch (Exception e) { Log.Warn("Map GPS send failed: " + e.Message); }
+                }
+                _mapLmb = lmb;
+            }
+            else
             {
                 SetButton(lmb);
             }
@@ -249,7 +259,7 @@ namespace MouseStick
                 action();
         }
 
-        // LMB on radar / ARAD: held button.
+        // LMB on every page but the TSD and NAV map: held thumbstick button.
         private void SetButton(bool down)
         {
             if (down == _buttonHeld)
@@ -377,7 +387,7 @@ namespace MouseStick
             {
                 string problem = _tgp.Begin((TargetingMFDPage)_target);
                 if (problem != null)
-                    MouseStickBehaviour.ShowToastStatic(problem);
+                    VirtualJoystickBehaviour.ShowToastStatic(problem);
             }
         }
 
