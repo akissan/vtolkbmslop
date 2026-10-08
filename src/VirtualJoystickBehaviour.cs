@@ -206,15 +206,19 @@ namespace VirtualJoystick
             }
         }
 
-        // Camera FOV keys (FlatScreen 3): increase / decrease while held, save the FOV and reset to the saved one, and the
-        // magnifier, which zooms to magnifierFov while held and goes back to the FOV from before on release.
+        // Camera FOV keys (FlatScreen 3): increase / decrease while held; the reset key resets to the saved FOV on a tap and
+        // saves the current FOV when held; the magnifier zooms to magnifierFov while held and goes back on release.
+        private const float FovSaveHoldSeconds = 0.6f;
         private float _fovBeforeMagnifier = -1f; // < 0: magnifier not held
+        private float _fovResetDownAt = -1f;     // < 0: reset key not held
+        private bool _fovSaved;                  // this hold of the reset key already saved
 
         private void HandleCameraFovKeys()
         {
             if (!FlatScreenCompat.TryGetFov(out float fov))
             {
                 _fovBeforeMagnifier = -1f;
+                _fovResetDownAt = -1f;
                 return;
             }
 
@@ -232,26 +236,52 @@ namespace VirtualJoystick
             }
             bool magnified = _fovBeforeMagnifier >= 0f;
 
+            // Reset key: saves once held long enough, else resets on release. The save-only / reset-only keys act on press.
             // While magnified, save and reset act on the FOV the magnifier returns to.
-            if (Cockpit.KeyActions.Pressed(S.cameraFovSaveKey))
+            if (Cockpit.KeyActions.Pressed(S.cameraFovSaveOnlyKey))
+                SaveFov(magnified ? _fovBeforeMagnifier : fov);
+            if (Cockpit.KeyActions.Pressed(S.cameraFovResetOnlyKey))
+                ResetFov(magnified, ref fov);
+            if (Cockpit.KeyActions.Held(S.cameraFovResetKey))
             {
-                S.savedFov = Mathf.Clamp(magnified ? _fovBeforeMagnifier : fov, FlatScreenCompat.MinFov, FlatScreenCompat.MaxFov);
-                VirtualJoystickSettings.SaveIfChanged();
-                ShowToast($"FOV {S.savedFov:0}° saved");
+                if (_fovResetDownAt < 0f)
+                {
+                    _fovResetDownAt = Time.unscaledTime;
+                    _fovSaved = false;
+                }
+                if (!_fovSaved && Time.unscaledTime - _fovResetDownAt >= FovSaveHoldSeconds)
+                {
+                    _fovSaved = true; // once per hold
+                    SaveFov(magnified ? _fovBeforeMagnifier : fov);
+                }
             }
-            if (Cockpit.KeyActions.Pressed(S.cameraFovResetKey))
+            else if (_fovResetDownAt >= 0f)
             {
-                if (magnified)
-                    _fovBeforeMagnifier = S.savedFov;
-                else
-                    FlatScreenCompat.SetFov(fov = S.savedFov);
-                ShowToast($"FOV reset to {S.savedFov:0}°");
+                _fovResetDownAt = -1f;
+                if (!_fovSaved)
+                    ResetFov(magnified, ref fov);
             }
 
             float dir = KeyAxis(VirtualJoystickSettings.ParseKeyQuiet(S.cameraFovIncreaseKey),
                 VirtualJoystickSettings.ParseKeyQuiet(S.cameraFovDecreaseKey));
             if (dir != 0f && !magnified)
                 FlatScreenCompat.SetFov(fov + dir * S.cameraFovRate * Time.unscaledDeltaTime);
+        }
+
+        private void SaveFov(float fov)
+        {
+            S.savedFov = Mathf.Clamp(fov, FlatScreenCompat.MinFov, FlatScreenCompat.MaxFov);
+            VirtualJoystickSettings.SaveIfChanged();
+            ShowToast($"FOV {S.savedFov:0}° saved");
+        }
+
+        private void ResetFov(bool magnified, ref float fov)
+        {
+            if (magnified)
+                _fovBeforeMagnifier = S.savedFov;
+            else
+                FlatScreenCompat.SetFov(fov = S.savedFov);
+            ShowToast($"FOV reset to {S.savedFov:0}°");
         }
 
         // Settings only change through the settings window: while it's open, save changes about once a second (closing

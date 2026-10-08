@@ -786,23 +786,24 @@ namespace VirtualJoystick
                 {
                     B("Camera FOV increase", s => s.cameraFovIncreaseKey, (s, v) => s.cameraFovIncreaseKey = v),
                     B("Camera FOV decrease", s => s.cameraFovDecreaseKey, (s, v) => s.cameraFovDecreaseKey = v),
-                    B("Save FOV", s => s.cameraFovSaveKey, (s, v) => s.cameraFovSaveKey = v),
-                    B("Reset FOV (to saved)", s => s.cameraFovResetKey, (s, v) => s.cameraFovResetKey = v),
+                    B("Reset FOV (hold: save FOV)", s => s.cameraFovResetKey, (s, v) => s.cameraFovResetKey = v),
+                    B("Save FOV", s => s.cameraFovSaveOnlyKey, (s, v) => s.cameraFovSaveOnlyKey = v),
+                    B("Reset FOV", s => s.cameraFovResetOnlyKey, (s, v) => s.cameraFovResetOnlyKey = v),
                     B("Magnifier (hold)", s => s.magnifierKey, (s, v) => s.magnifierKey = v),
                 } },
             } },
         };
 
-        // Camera FOV: increase / decrease and their speed, save / reset and the saved FOV, magnifier and its FOV.
+        // Camera FOV: increase / decrease and their speed, reset / save and the saved FOV, magnifier and its FOV.
         private static void CameraFovBody(VirtualJoystickSettings s, Bind[] b)
         {
             KeyRows(b, 0, 2);
             s.cameraFovRate = CardSlider("FOV change speed", s.cameraFovRate, 5f, 120f, "0'°/s'");
             GUILayout.Space(GroupGap);
-            KeyRows(b, 2, 2);
+            KeyRows(b, 2, 3);
             s.savedFov = CardSlider("Saved FOV", s.savedFov, FlatScreenCompat.MinFov, FlatScreenCompat.MaxFov, "0'°'");
             GUILayout.Space(GroupGap);
-            KeyRows(b, 4, 1);
+            KeyRows(b, 5, 1);
             s.magnifierFov = CardSlider("Magnifier FOV", s.magnifierFov, FlatScreenCompat.MinFov, FlatScreenCompat.MaxFov, "0'°'");
         }
 

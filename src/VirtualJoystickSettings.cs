@@ -180,8 +180,10 @@ namespace VirtualJoystick
         public string cameraFovIncreaseKey = "PageUp";
         public string cameraFovDecreaseKey = "PageDown";
         public float cameraFovRate = 45f;          // degrees per second while increase / decrease is held
-        public string cameraFovSaveKey = "End";    // saves the current FOV as the one Reset returns to
+        // Tap: reset the FOV to savedFov. Hold (FovSaveHoldSeconds): save the current FOV as savedFov.
         public string cameraFovResetKey = "Home";
+        public string cameraFovSaveOnlyKey = "None";
+        public string cameraFovResetOnlyKey = "None";
         public float savedFov = FlatScreenCompat.DefaultFov;
         public string magnifierKey = "Z";          // zooms to magnifierFov while held
         public float magnifierFov = 40f;
