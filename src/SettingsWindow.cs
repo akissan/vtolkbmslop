@@ -277,12 +277,10 @@ namespace VirtualJoystick
             // Drawn in a keycap instead of by the button: a bound key's name in capitals, an empty cap with a cross, or
             // while waiting for a key, PRESS A KEY with cycling dots.
             bool bound = !string.IsNullOrEmpty(current) && current != "None";
-            string text = capturing ? "Press a key…" : KeyDisplayName(current);
-            if (bound)
-                text = text.ToUpperInvariant();
             GUIStyle keyStyle = !capturing && clashes.Count > 0 ? Theme.KeyButtonClash : Theme.KeyButton;
             GUIStyle drawStyle = !capturing && clashes.Count > 0 ? Theme.KeyButtonClashCapped : Theme.KeyButtonCapped;
-            if (GUILayout.Button(text, drawStyle, GUILayout.ExpandWidth(true)))
+            // The button's own text is invisible and only gives it its one-line height.
+            if (GUILayout.Button("KEY", drawStyle, GUILayout.ExpandWidth(true)))
                 _rebinding = capturing ? null : b;
             if (Event.current.type == EventType.Repaint)
             {
@@ -294,7 +292,7 @@ namespace VirtualJoystick
                     Keycap(button, "PRESS A KEY" + new string('.', dots), keyStyle, false, "PRESS A KEY...");
                 }
                 else
-                    Keycap(button, bound ? text : null, keyStyle);
+                    Keycap(button, bound ? KeyDisplayName(current).ToUpperInvariant() : null, keyStyle);
             }
             GUILayout.EndHorizontal();
             if (clashes.Count > 0 && !capturing)
