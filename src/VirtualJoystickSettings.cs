@@ -176,6 +176,15 @@ namespace VirtualJoystick
         public string nvgOnKey = "None";
         public string nvgOffKey = "None";
         public string nvgToggleKey = "N";
+        // Camera field of view (FlatScreen 3), while held.
+        public string cameraFovIncreaseKey = "PageUp";
+        public string cameraFovDecreaseKey = "PageDown";
+        public float cameraFovRate = 45f;          // degrees per second while increase / decrease is held
+        public string cameraFovSaveKey = "End";    // saves the current FOV as the one Reset returns to
+        public string cameraFovResetKey = "Home";
+        public float savedFov = FlatScreenCompat.DefaultFov;
+        public string magnifierKey = "Z";          // zooms to magnifierFov while held
+        public float magnifierFov = 40f;
 
         // Opens the settings window.
         public string menuKey = "F8";
@@ -203,6 +212,9 @@ namespace VirtualJoystick
         // VR recentre), with the stick on or off.
         public bool middleHoldRecentersView = true;
         public float middleHoldSeconds = 1f;
+        // Ignore FlatScreen 3's scroll-wheel zoom (camera FOV) entirely; the FOV keys still work. It is always ignored in
+        // SOI cursor mode, where the wheel zooms the SOI page.
+        public bool disableFlatScreenScrollZoom = true;
         // Re-centre the virtual stick every time the mode is switched on.
         public bool recenterOnEnable = true;
 

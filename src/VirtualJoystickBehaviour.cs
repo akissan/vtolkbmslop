@@ -47,11 +47,6 @@ namespace VirtualJoystick
 
         private Vector2 _virtualPos;  // raw mouse-driven position, -1..1 per axis
         private float _yaw;
-        private Vector3 _output
-        {
-            get => Output;
-            set => Output = value;
-        }
         private bool _freeLook;
         private bool _skipNextDelta;
 
@@ -120,8 +115,15 @@ namespace VirtualJoystick
         private static bool IsHeld(KeyCode k) => k != KeyCode.None && Input.GetKey(k);
         private static bool IsDown(KeyCode k) => k != KeyCode.None && Input.GetKeyDown(k);
 
-        private static float KeyAxis(KeyCode positive, KeyCode negative) =>
-            (positive != KeyCode.None && Input.GetKey(positive) ? 1f : 0f) - (negative != KeyCode.None && Input.GetKey(negative) ? 1f : 0f);
+        private static float KeyAxis(KeyCode positive, KeyCode negative) => (IsHeld(positive) ? 1f : 0f) - (IsHeld(negative) ? 1f : 0f);
+
+        private bool ReleaseKeyDown()
+        {
+            foreach (var key in _releaseKeys)
+                if (IsDown(key))
+                    return true;
+            return false;
+        }
 
         private void OnApplicationQuit() => VirtualJoystickSettings.SaveIfChanged();
 
@@ -204,6 +206,54 @@ namespace VirtualJoystick
             }
         }
 
+        // Camera FOV keys (FlatScreen 3): increase / decrease while held, save the FOV and reset to the saved one, and the
+        // magnifier, which zooms to magnifierFov while held and goes back to the FOV from before on release.
+        private float _fovBeforeMagnifier = -1f; // < 0: magnifier not held
+
+        private void HandleCameraFovKeys()
+        {
+            if (!FlatScreenCompat.TryGetFov(out float fov))
+            {
+                _fovBeforeMagnifier = -1f;
+                return;
+            }
+
+            if (Cockpit.KeyActions.Held(S.magnifierKey))
+            {
+                if (_fovBeforeMagnifier < 0f)
+                    _fovBeforeMagnifier = fov;
+                FlatScreenCompat.SetFov(S.magnifierFov);
+            }
+            else if (_fovBeforeMagnifier >= 0f)
+            {
+                fov = _fovBeforeMagnifier;
+                _fovBeforeMagnifier = -1f;
+                FlatScreenCompat.SetFov(fov);
+            }
+            bool magnified = _fovBeforeMagnifier >= 0f;
+
+            // While magnified, save and reset act on the FOV the magnifier returns to.
+            if (Cockpit.KeyActions.Pressed(S.cameraFovSaveKey))
+            {
+                S.savedFov = Mathf.Clamp(magnified ? _fovBeforeMagnifier : fov, FlatScreenCompat.MinFov, FlatScreenCompat.MaxFov);
+                VirtualJoystickSettings.SaveIfChanged();
+                ShowToast($"FOV {S.savedFov:0}° saved");
+            }
+            if (Cockpit.KeyActions.Pressed(S.cameraFovResetKey))
+            {
+                if (magnified)
+                    _fovBeforeMagnifier = S.savedFov;
+                else
+                    FlatScreenCompat.SetFov(fov = S.savedFov);
+                ShowToast($"FOV reset to {S.savedFov:0}°");
+            }
+
+            float dir = KeyAxis(VirtualJoystickSettings.ParseKeyQuiet(S.cameraFovIncreaseKey),
+                VirtualJoystickSettings.ParseKeyQuiet(S.cameraFovDecreaseKey));
+            if (dir != 0f && !magnified)
+                FlatScreenCompat.SetFov(fov + dir * S.cameraFovRate * Time.unscaledDeltaTime);
+        }
+
         // Settings only change through the settings window: while it's open, save changes about once a second (closing
         // it saves too), so a crash loses at most a second of tweaking.
         private const float SettingsSaveInterval = 1f;
@@ -247,6 +297,7 @@ namespace VirtualJoystick
                 FlatScreenCompat.TryPatch();
                 bool freeCursor = !SuppressCockpitHover && !SettingsWindow.CursorOverWindow && !SoiMode && !HeadModeOwnsLmb;
                 ScreenPointer.Update(S.handleScreens, freeCursor, GetPlayerVehicle());
+                HandleCameraFovKeys();
             }
 
             if (!IsActive)
@@ -256,15 +307,12 @@ namespace VirtualJoystick
                 return;
             }
 
-            foreach (var key in _releaseKeys)
+            if (ReleaseKeyDown())
             {
-                if (key != KeyCode.None && Input.GetKeyDown(key))
-                {
-                    // Release keys hand the cursor to FlatScreen 3's menus, so SOI mode must not grab it back.
-                    _soiToggled = false;
-                    Deactivate();
-                    return;
-                }
+                // Release keys hand the cursor to FlatScreen 3's menus, so SOI mode must not grab it back.
+                _soiToggled = false;
+                Deactivate();
+                return;
             }
 
             // Settings window open, or clickable mode (hold Left Alt while the stick is on): hand the cursor back so the
@@ -296,10 +344,8 @@ namespace VirtualJoystick
 
             // SOI mode: the mouse is the cursor of the SOI page instead of flying. Cursor stays captured, WASD keeps
             // flying. T toggles it; Mouse button 4 flips it while held. Clickable mode and the menu take priority.
-            if (!menuOpen && !ClickMode && IsDown(_tgpKey))
-                _soiToggled = !_soiToggled;
             bool wasSoiMode = SoiMode;
-            SoiMode = !menuOpen && !ClickMode && (_soiToggled ^ IsHeld(_soiHoldKey));
+            SoiMode = UpdateSoiToggle(!menuOpen && !ClickMode, releaseKey: false);
             if (SoiMode && !wasSoiMode)
             {
                 _soi.Begin(GetPlayerVehicle());
@@ -317,19 +363,12 @@ namespace VirtualJoystick
 
             _unityTravel += Mathf.Abs(Input.GetAxisRaw("Mouse X")) + Mathf.Abs(Input.GetAxisRaw("Mouse Y"));
 
-            bool lmb = !menuOpen && !ClickMode && Input.GetMouseButton(0);
-            // TGP HEAD mode / radar head boresight: LMB is the page's head action (TGP lock / radar BORE).
-            if (Cockpit.SoiKeys.HeadModeLmb(lmb))
-                lmb = false;
+            bool lmb = LmbAfterHeadMode(!menuOpen && !ClickMode && Input.GetMouseButton(0));
 
             Vector2 delta = Vector2.zero;
             if (Application.isFocused && !_freeLook && !menuOpen && !ClickMode)
             {
-                if (!Win32Mouse.IsCaptured)
-                    Win32Mouse.Capture();
-                // First frame after capture, free look or the menu: just re-centre so the stick doesn't jump.
-                Vector2 px = Win32Mouse.ReadDelta(recenterOnly: wasFreeLook || _skipNextDelta);
-                _skipNextDelta = false;
+                Vector2 px = ReadMouseDelta(wasFreeLook);
                 _win32Travel += Mathf.Abs(px.x) + Mathf.Abs(px.y);
                 if (SoiMode)
                     _soi.Update(px, lmb, S.tgpSensitivity, S.cursorSensitivity);
@@ -344,16 +383,8 @@ namespace VirtualJoystick
             }
             _virtualPos += delta;
 
-            // SOI mode: the wheel presses the page's own zoom / range buttons.
             if (SoiMode)
-            {
-                float scroll = Input.mouseScrollDelta.y;
-                if (scroll > 0f) _soi.Zoom(+1);
-                else if (scroll < 0f) _soi.Zoom(-1);
-                // Middle mouse: the page's re-centre (TGP FWD, map reset, TSD centre, radar unlock, ARAD deselect).
-                if (_middleShortPress)
-                    _soi.Recenter();
-            }
+                UpdateSoiWheelAndMiddle();
 
             if (S.autoCenterRate > 0f && delta == Vector2.zero)
                 _virtualPos = Vector2.MoveTowards(_virtualPos, Vector2.zero, S.autoCenterRate * dt);
@@ -361,10 +392,7 @@ namespace VirtualJoystick
             if (S.middleMouseRecenters && !ClickMode && !SoiMode && _middleShortPress)
                 _virtualPos = Vector2.zero;
 
-            if (S.circularLimit)
-                _virtualPos = Vector2.ClampMagnitude(_virtualPos, 1f);
-            else
-                _virtualPos = new Vector2(Mathf.Clamp(_virtualPos.x, -1f, 1f), Mathf.Clamp(_virtualPos.y, -1f, 1f));
+            _virtualPos = ClampToLimit(_virtualPos);
 
             UpdateKeyboardAxes(dt);
             ApplyStickPos(CombineMouseAndKeyboard(_virtualPos, _keyboard));
@@ -411,17 +439,20 @@ namespace VirtualJoystick
             return p;
         }
 
+        // Inside the travel limit: the circle, or the square.
+        private static Vector2 ClampToLimit(Vector2 p) => S.circularLimit
+            ? Vector2.ClampMagnitude(p, 1f)
+            : new Vector2(Mathf.Clamp(p.x, -1f, 1f), Mathf.Clamp(p.y, -1f, 1f));
+
         // Clamps the combined stick position, shapes it and stores the flight-control output.
         private void ApplyStickPos(Vector2 pos)
         {
-            _stickPos = S.circularLimit
-                ? Vector2.ClampMagnitude(pos, 1f)
-                : new Vector2(Mathf.Clamp(pos.x, -1f, 1f), Mathf.Clamp(pos.y, -1f, 1f));
+            _stickPos = ClampToLimit(pos);
 
             // VRJoystick axes: x = pitch (+ = stick forward / nose down), y = yaw (+ = right), z = roll (+ = left).
             float inv = S.invertPitch ? -1f : 1f;
             Vector2 shaped = Shape(_stickPos);
-            _output = new Vector3(shaped.y * inv, _yaw, -shaped.x);
+            Output = new Vector3(shaped.y * inv, _yaw, -shaped.x);
         }
 
         // WASD and rudder keys with the virtual joystick off. The flight controls are only overridden while a key is
@@ -457,10 +488,16 @@ namespace VirtualJoystick
             if (!KeyboardFlying)
                 return;
             KeyboardFlying = false;
+            CentreStick();
+        }
+
+        // Zero the flight input and let go of the stick rather than leaving the last deflection held. Called once the
+        // stick is off / keyboard flying has ended, so the stick events go out too.
+        private void CentreStick()
+        {
+            Output = Vector3.zero;
             _keyboard = Vector2.zero;
             _yaw = 0f;
-            _output = Vector3.zero;
-            // Let go of the stick rather than leaving the last deflection held.
             ApplyStickVisual(Vector3.zero);
         }
 
@@ -478,13 +515,7 @@ namespace VirtualJoystick
                 return;
             }
 
-            if (!menuOpen && IsDown(_tgpKey))
-                _soiToggled = !_soiToggled;
-            foreach (var key in _releaseKeys)
-                if (key != KeyCode.None && Input.GetKeyDown(key))
-                    _soiToggled = false;
-
-            bool want = !menuOpen && (_soiToggled ^ IsHeld(_soiHoldKey));
+            bool want = UpdateSoiToggle(!menuOpen, releaseKey: ReleaseKeyDown());
             if (want && !SoiMode)
             {
                 SoiMode = true;
@@ -501,19 +532,14 @@ namespace VirtualJoystick
             if (!SoiMode)
                 return;
 
-            bool lmb = Input.GetMouseButton(0);
-            if (Cockpit.SoiKeys.HeadModeLmb(lmb))
-                lmb = false;
+            bool lmb = LmbAfterHeadMode(Input.GetMouseButton(0));
             bool wasFreeLook = _freeLook;
             _freeLook = Input.GetMouseButton(1);
 
             Vector2 px = Vector2.zero;
             if (Application.isFocused && !_freeLook)
             {
-                if (!Win32Mouse.IsCaptured)
-                    Win32Mouse.Capture();
-                px = Win32Mouse.ReadDelta(recenterOnly: wasFreeLook || _skipNextDelta);
-                _skipNextDelta = false;
+                px = ReadMouseDelta(wasFreeLook);
             }
             else
             {
@@ -521,13 +547,43 @@ namespace VirtualJoystick
                 _skipNextDelta = true;
             }
             _soi.Update(px, lmb, S.tgpSensitivity, S.cursorSensitivity);
+            UpdateSoiWheelAndMiddle();
+        }
 
+        // T toggles SOI mode, the hold key flips it while held, a release key clears the toggle. Returns whether SOI
+        // mode should be on (never while not allowed: menu open, clickable mode).
+        private bool UpdateSoiToggle(bool allowed, bool releaseKey)
+        {
+            if (allowed && IsDown(_tgpKey))
+                _soiToggled = !_soiToggled;
+            if (releaseKey)
+                _soiToggled = false;
+            return allowed && (_soiToggled ^ IsHeld(_soiHoldKey));
+        }
+
+        // SOI mode: the wheel presses the page's own zoom / range buttons; a short middle press is the page's re-centre
+        // (TGP FWD, map reset, TSD centre, radar unlock, ARAD deselect).
+        private void UpdateSoiWheelAndMiddle()
+        {
             float scroll = Input.mouseScrollDelta.y;
             if (scroll > 0f) _soi.Zoom(+1);
             else if (scroll < 0f) _soi.Zoom(-1);
             if (_middleShortPress)
                 _soi.Recenter();
+        }
 
+        // TGP HEAD mode / radar head boresight: LMB is the page's head action (TGP lock / radar BORE), not a click.
+        private static bool LmbAfterHeadMode(bool lmb) => !Cockpit.SoiKeys.HeadModeLmb(lmb) && lmb;
+
+        // Captured mouse movement in pixels. The first frame after capture, free look or the menu only re-centres, so
+        // the stick / cursor doesn't jump.
+        private Vector2 ReadMouseDelta(bool wasFreeLook)
+        {
+            if (!Win32Mouse.IsCaptured)
+                Win32Mouse.Capture();
+            Vector2 px = Win32Mouse.ReadDelta(recenterOnly: wasFreeLook || _skipNextDelta);
+            _skipNextDelta = false;
+            return px;
         }
 
         private void EndSoiWithStickOff()
@@ -556,7 +612,7 @@ namespace VirtualJoystick
         {
             ScreenPointer.LateUpdate();
             if (!IsActive && KeyboardFlying)
-                ApplyStickVisual(_output);
+                ApplyStickVisual(Output);
             if (!IsActive && SoiMode)
             {
                 // SOI mode with the stick off: keep the captured cursor hidden (FlatScreen 3 re-shows it on movement).
@@ -571,7 +627,7 @@ namespace VirtualJoystick
             if (!_freeLook && !SettingsWindow.IsOpen && !ClickMode)
                 Cursor.visible = false;
 
-            ApplyStickVisual(_output);
+            ApplyStickVisual(Output);
         }
 
         private void HandleToggleKey()
@@ -729,7 +785,7 @@ namespace VirtualJoystick
                 _keyboard = Vector2.zero;
             KeyboardFlying = false;
             _stickPos = _virtualPos;
-            _output = Vector3.zero;
+            Output = Vector3.zero;
 
             _savedReturnToZero.Clear();
             foreach (var js in _sticks)
@@ -767,18 +823,14 @@ namespace VirtualJoystick
             }
 
             Cockpit.SoiKeys.LmbSelect(false);
-            // Let go of the stick rather than leaving the last deflection held.
-            ApplyStickVisual(Vector3.zero);
+            // Keys still held pick up from centre with the stick off (UpdateKeyboardWithStickOff).
+            CentreStick();
             foreach (var kv in _savedReturnToZero)
             {
                 if (kv.Key != null)
                     kv.Key.returnToZeroWhenReleased = kv.Value;
             }
             _savedReturnToZero.Clear();
-            _output = Vector3.zero;
-            // Keys still held pick up from centre with the stick off (UpdateKeyboardWithStickOff).
-            _keyboard = Vector2.zero;
-            _yaw = 0f;
 
             Win32Mouse.Release();
             Cursor.lockState = CursorLockMode.None;
@@ -974,7 +1026,7 @@ namespace VirtualJoystick
                         dup |= (other - g).sqrMagnitude < 1f;
                     _ringsDrawn.Add(g);
                     if (!dup)
-                        DrawThickRing(g, HighlightRadius, 6f, mark);
+                        DrawSolidRing(g, HighlightRadius, 6f, mark);
                     if (win.Contains(g))
                         continue;
                     var end = new Vector2(g.x < win.center.x ? win.xMin : win.xMax, h.CardY);
@@ -1021,17 +1073,24 @@ namespace VirtualJoystick
             float half = S.overlaySize * 0.5f;
             Vector2 c = new Vector2(Screen.width * 0.5f, Screen.height * 0.5f);
 
-            Vector2 p = new Vector2(c.x + _stickPos.x * half, c.y - _stickPos.y * half);
+            Vector2 p = ToScreen(_stickPos, c, half);
             bool inDz = _stickPos.magnitude <= S.deadzone;
-            Color color = SettingsWindow.IsOpen && inDz ? new Color(1f, 0.85f, 0.3f, a) : new Color(0.55f, 1f, 0.6f, a);
+            Color color = WithAlpha(SettingsWindow.IsOpen && inDz ? DeadzoneYellow : OverlayGreen, a);
             if (inDz)
                 color.a *= 0.5f; // 50% more transparent inside the deadzone
-            DrawLine(c, p, 1.5f, new Color(color.r, color.g, color.b, a * 0.5f));
+            DrawLine(c, p, 1.5f, WithAlpha(color, a * 0.5f));
             float r = 4f;
             GUI.color = color;
             GUI.DrawTexture(new Rect(p.x - r, p.y - r, r * 2f, r * 2f), _dot);
             GUI.color = Color.white;
         }
+
+        private static readonly Color OverlayGreen = new Color(0.55f, 1f, 0.6f, 1f);
+        private static readonly Color DeadzoneYellow = new Color(1f, 0.85f, 0.3f, 1f);
+        private static Color WithAlpha(Color c, float a) => new Color(c.r, c.g, c.b, a);
+
+        // Stick position (-1..1, y up) to a GUI point in the control area around c.
+        private static Vector2 ToScreen(Vector2 p, Vector2 c, float half) => new Vector2(c.x + p.x * half, c.y - p.y * half);
 
         // Free look and SOI cursor mode: the mouse isn't flying, so the stick overlay goes grey and fainter.
         private bool OverlayPassive => _freeLook || SoiMode;
@@ -1059,7 +1118,7 @@ namespace VirtualJoystick
             Rect box = new Rect(c.x - half, c.y - half, size, size);
 
             bool passive = OverlayPassive;
-            Color frame = passive ? PassiveColor(a) : new Color(0.55f, 1f, 0.6f, a);
+            Color frame = passive ? PassiveColor(a) : WithAlpha(OverlayGreen, a);
             Color faint = new Color(1f, 1f, 1f, 0.18f * a);
 
             Vector2 mousePos = IsActive ? _virtualPos : Vector2.zero;
@@ -1071,16 +1130,16 @@ namespace VirtualJoystick
             {
                 float ringA = Edge(mousePos.magnitude);
                 if (ringA > 0.001f)
-                    DrawRing(c, half, new Color(frame.r, frame.g, frame.b, ringA * a));
+                    DrawRing(c, half, WithAlpha(frame, ringA * a));
             }
             else
             {
                 const float t = 2f;
                 float right = Edge(mousePos.x), left = Edge(-mousePos.x), top = Edge(mousePos.y), bottom = Edge(-mousePos.y);
-                if (right > 0.001f) Fill(new Rect(box.xMax - t, box.y, t, size), new Color(frame.r, frame.g, frame.b, right * a));
-                if (left > 0.001f) Fill(new Rect(box.x, box.y, t, size), new Color(frame.r, frame.g, frame.b, left * a));
-                if (top > 0.001f) Fill(new Rect(box.x, box.y, size, t), new Color(frame.r, frame.g, frame.b, top * a));
-                if (bottom > 0.001f) Fill(new Rect(box.x, box.yMax - t, size, t), new Color(frame.r, frame.g, frame.b, bottom * a));
+                if (right > 0.001f) Fill(new Rect(box.xMax - t, box.y, t, size), WithAlpha(frame, right * a));
+                if (left > 0.001f) Fill(new Rect(box.x, box.y, t, size), WithAlpha(frame, left * a));
+                if (top > 0.001f) Fill(new Rect(box.x, box.y, size, t), WithAlpha(frame, top * a));
+                if (bottom > 0.001f) Fill(new Rect(box.x, box.yMax - t, size, t), WithAlpha(frame, bottom * a));
             }
 
             // Centre cross.
@@ -1091,38 +1150,39 @@ namespace VirtualJoystick
             float dz = S.deadzone * half;
             if (dz >= 1f && SettingsWindow.IsOpen)
             {
-                GUI.color = new Color(1f, 0.85f, 0.3f, 0.16f * a);
+                GUI.color = WithAlpha(DeadzoneYellow, 0.16f * a);
                 GUI.DrawTexture(new Rect(c.x - dz, c.y - dz, dz * 2f, dz * 2f), _dot);
                 GUI.color = Color.white;
-                DrawRing(c, dz, new Color(1f, 0.85f, 0.3f, 0.55f * a));
+                DrawSolidRing(c, dz, 1.5f, WithAlpha(DeadzoneYellow, 0.55f * a));
             }
 
             // Filled dot = mouse position only. Hollow ring = actual stick (mouse + WASD), shown while keyboard input
             // is non-zero. Screen up = mouse up. When only previewing from the settings window both sit at centre.
             Vector2 stickPos = IsActive ? _stickPos : Vector2.zero;
             bool showCombined = IsActive && _keyboard.sqrMagnitude > 1e-6f;
-            Vector2 pm = new Vector2(c.x + mousePos.x * half, c.y - mousePos.y * half);
-            Vector2 ps = new Vector2(c.x + stickPos.x * half, c.y - stickPos.y * half);
+            Vector2 pm = ToScreen(mousePos, c, half);
+            Vector2 ps = ToScreen(stickPos, c, half);
 
             // Colour reflects the actual stick output (deadzone yellow only while the settings window is open).
             bool inDeadzone = SettingsWindow.IsOpen && stickPos.magnitude <= S.deadzone;
             Color dotColor = passive ? new Color(0.8f, 0.8f, 0.8f, 0.6f * a)
                 : Cockpit.KeyActions.Right.TriggerHeld ? new Color(1f, 0.3f, 0.25f, a)
-                : inDeadzone ? new Color(1f, 0.85f, 0.3f, a)
-                : new Color(0.55f, 1f, 0.6f, a);
+                : inDeadzone ? WithAlpha(DeadzoneYellow, a)
+                : WithAlpha(OverlayGreen, a);
 
             // Only the mouse dot gets a (faint) line from centre; the ring stands alone.
-            DrawLine(c, pm, 1.5f, new Color(dotColor.r, dotColor.g, dotColor.b, dotColor.a * 0.35f));
+            DrawLine(c, pm, 1.5f, WithAlpha(dotColor, dotColor.a * 0.35f));
 
             float r = S.stickDotSize;
             // Inside the deadzone (no output) the dot is drawn 50% more transparent.
             float dotAlpha = dotColor.a * (showCombined ? 0.75f : 1f) * (stickPos.magnitude <= S.deadzone ? 0.5f : 1f);
-            GUI.color = new Color(dotColor.r, dotColor.g, dotColor.b, dotAlpha);
+            GUI.color = WithAlpha(dotColor, dotAlpha);
             GUI.DrawTexture(new Rect(pm.x - r, pm.y - r, r * 2f, r * 2f), _dot);
             GUI.color = Color.white;
 
+            // Keyboard ring: half the radius it used to have (dot size + 2 px).
             if (showCombined)
-                DrawRing(ps, S.stickDotSize + 2f, dotColor, 1.5f);
+                DrawSolidRing(ps, (S.stickDotSize + 2f) * 0.5f, 1.5f, dotColor);
 
             // Title only in non-default states; plain flying shows no text.
             string title = !IsActive ? "PREVIEW"
@@ -1182,14 +1242,6 @@ namespace VirtualJoystick
             GUI.color = color;
             GUI.DrawTexture(r, _white);
             GUI.color = Color.white;
-        }
-
-        private void Outline(Rect r, float t, Color color)
-        {
-            Fill(new Rect(r.x, r.y, r.width, t), color);
-            Fill(new Rect(r.x, r.yMax - t, r.width, t), color);
-            Fill(new Rect(r.x, r.y + t, t, r.height - 2f * t), color);
-            Fill(new Rect(r.xMax - t, r.y + t, t, r.height - 2f * t), color);
         }
 
         private void DrawLine(Vector2 from, Vector2 to, float width, Color color)
@@ -1285,8 +1337,9 @@ namespace VirtualJoystick
         private const float HighlightRadius = 16f;
         private readonly System.Collections.Generic.List<Vector2> _ringsDrawn = new System.Collections.Generic.List<Vector2>();
 
-        // Solid annulus of the given width centred on radius, one quad per segment so there are no joints.
-        private void DrawThickRing(Vector2 c, float radius, float width, Color color)
+        // Solid annulus of the given width centred on radius, one quad per segment so there are no joints. Small rings
+        // (highlight, deadzone, keyboard); the travel-limit circle uses DrawRing's rotated lines.
+        private void DrawSolidRing(Vector2 c, float radius, float width, Color color)
         {
             const int segments = 48;
             float rIn = radius - width * 0.5f, rOut = radius + width * 0.5f;
@@ -1300,6 +1353,7 @@ namespace VirtualJoystick
             }
         }
 
+        // Circle of rotated line segments: the circular travel limit.
         private void DrawRing(Vector2 c, float radius, Color color, float width = 1.5f)
         {
             int segments = radius < 20f ? 24 : 48;

@@ -167,6 +167,7 @@ namespace VirtualJoystick
             s.enableOnSpawn = Toggle("Enable stick control when entering cockpit", s.enableOnSpawn);
             s.middleHoldRecentersView = Toggle("Hold middle mouse to recentre", s.middleHoldRecentersView);
             s.middleHoldSeconds = Slider("Hold time", s.middleHoldSeconds, 0.2f, 2f, "0.0' s'");
+            s.disableFlatScreenScrollZoom = Toggle("Disable FlatScreen 3 scroll wheel FOV zoom", s.disableFlatScreenScrollZoom);
             EndPanel();
 
             BeginPanel("SOI cursor");
@@ -781,8 +782,29 @@ namespace VirtualJoystick
                     B("NVG off", s => s.nvgOffKey, (s, v) => s.nvgOffKey = v),
                     B("Toggle", s => s.nvgToggleKey, (s, v) => s.nvgToggleKey = v),
                 } },
+                new BindCard { Title = "Camera FOV", Available = () => FlatScreenCompat.FovAvailable, Body = CameraFovBody, Binds = new[]
+                {
+                    B("Camera FOV increase", s => s.cameraFovIncreaseKey, (s, v) => s.cameraFovIncreaseKey = v),
+                    B("Camera FOV decrease", s => s.cameraFovDecreaseKey, (s, v) => s.cameraFovDecreaseKey = v),
+                    B("Save FOV", s => s.cameraFovSaveKey, (s, v) => s.cameraFovSaveKey = v),
+                    B("Reset FOV (to saved)", s => s.cameraFovResetKey, (s, v) => s.cameraFovResetKey = v),
+                    B("Magnifier (hold)", s => s.magnifierKey, (s, v) => s.magnifierKey = v),
+                } },
             } },
         };
+
+        // Camera FOV: increase / decrease and their speed, save / reset and the saved FOV, magnifier and its FOV.
+        private static void CameraFovBody(VirtualJoystickSettings s, Bind[] b)
+        {
+            KeyRows(b, 0, 2);
+            s.cameraFovRate = CardSlider("FOV change speed", s.cameraFovRate, 5f, 120f, "0'°/s'");
+            GUILayout.Space(GroupGap);
+            KeyRows(b, 2, 2);
+            s.savedFov = CardSlider("Saved FOV", s.savedFov, FlatScreenCompat.MinFov, FlatScreenCompat.MaxFov, "0'°'");
+            GUILayout.Space(GroupGap);
+            KeyRows(b, 4, 1);
+            s.magnifierFov = CardSlider("Magnifier FOV", s.magnifierFov, FlatScreenCompat.MinFov, FlatScreenCompat.MaxFov, "0'°'");
+        }
 
         // Stick movement: pitch, roll and rudder groups, each its keys then its speeds.
         private static void StickMovementBody(VirtualJoystickSettings s, Bind[] b)

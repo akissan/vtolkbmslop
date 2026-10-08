@@ -42,6 +42,87 @@ namespace VirtualJoystick
             {
                 Log.Error("Failed to hook FlatScreen 3 hover: " + e);
             }
+
+            try
+            {
+                var update = AccessTools.Method(type, "Update");
+                var setFov = AccessTools.Method(type, "SetCameraFOV");
+                TargetFov = AccessTools.Field(type, "_targetFoV");
+                _instanceProp = AccessTools.Property(type, "instance");
+                if (update == null || setFov == null || TargetFov == null || _instanceProp == null)
+                {
+                    TargetFov = null;
+                    Log.Warn("FlatScreen 3 found but its FOV members are missing; scroll zoom can't be blocked, FOV keys disabled.");
+                }
+                else
+                {
+                    _harmony.Patch(update, prefix: new HarmonyMethod(typeof(FlatScreenCompat), nameof(UpdatePrefix)),
+                        finalizer: new HarmonyMethod(typeof(FlatScreenCompat), nameof(UpdateFinalizer)));
+                    _harmony.Patch(setFov, prefix: new HarmonyMethod(typeof(FlatScreenCompat), nameof(SetCameraFovPrefix)));
+                    Log.Info("Hooked FlatScreen 3 FOV");
+                }
+            }
+            catch (Exception e)
+            {
+                TargetFov = null;
+                Log.Error("Failed to hook FlatScreen 3 FOV: " + e);
+            }
+        }
+
+        // ---------------------------------------------------------------- camera FOV
+
+        // FlatScreen 3's own limits and starting FOV.
+        public const float MinFov = 30f, MaxFov = 120f, DefaultFov = 60f;
+
+        private static FieldInfo TargetFov;     // FlatScreen3MonoBehaviour._targetFoV: the FOV it eases the camera to
+        private static PropertyInfo _instanceProp;  // FlatScreen3MonoBehaviour.instance
+        private static bool _inFsUpdate;
+        private static float _targetFovAtUpdateStart;
+
+        // FlatScreen 3's scroll-wheel zoom is ignored when turned off in the settings, in SOI cursor mode (the wheel zooms
+        // the SOI page / TGP there) and over the settings window.
+        private static bool BlockScrollZoom => VirtualJoystickSettings.Current.disableFlatScreenScrollZoom
+            || VirtualJoystickBehaviour.SoiMode || SettingsWindow.CursorOverWindow;
+
+        public static bool FovAvailable => TargetFov != null && FsInstance() != null;
+
+        private static object FsInstance() => _instanceProp?.GetValue(null);
+
+        // FlatScreen 3's target FOV: the camera eases there itself. False without FlatScreen 3.
+        public static bool TryGetFov(out float fov)
+        {
+            fov = 0f;
+            object fs = TargetFov == null ? null : FsInstance();
+            if (fs == null)
+                return false;
+            fov = (float)TargetFov.GetValue(fs);
+            return true;
+        }
+
+        public static void SetFov(float fov)
+        {
+            object fs = TargetFov == null ? null : FsInstance();
+            if (fs != null)
+                TargetFov.SetValue(fs, UnityEngine.Mathf.Clamp(fov, MinFov, MaxFov));
+        }
+
+        // Within FlatScreen3MonoBehaviour.Update only its scroll-wheel zoom changes _targetFoV (then applies it with
+        // SetCameraFOV); its per-frame easing calls SetCameraFOV with the value unchanged. So a SetCameraFOV during
+        // Update with a changed target is the scroll zoom: undo the change and skip it.
+        private static void UpdatePrefix(float ____targetFoV)
+        {
+            _inFsUpdate = true;
+            _targetFovAtUpdateStart = ____targetFoV;
+        }
+
+        private static void UpdateFinalizer() => _inFsUpdate = false;
+
+        private static bool SetCameraFovPrefix(ref float ____targetFoV)
+        {
+            if (!_inFsUpdate || ____targetFoV == _targetFovAtUpdateStart || !BlockScrollZoom)
+                return true;
+            ____targetFoV = _targetFovAtUpdateStart;
+            return false;
         }
 
         // Recentre the view: FlatScreen 3's own camera reset (exactly what its Ctrl+Z calls) if it's loaded, else the
@@ -88,6 +169,9 @@ namespace VirtualJoystick
             _harmony?.UnpatchSelf();
             _harmony = null;
             _attempted = false;
+            TargetFov = null;
+            _instanceProp = null;
+            _inFsUpdate = false;
         }
 
         private static System.Collections.Generic.IEnumerable<VRInteractable> _fsListSeen;
