@@ -84,6 +84,10 @@ namespace VirtualJoystick
         public string throttleThumbUpKey = "None";
         public string throttleThumbDownKey = "None";
         public string throttleThumbPressKey = "None";
+        // Helicopter collective flight grip (the left hand keys above drive its combat grip).
+        public string collectiveMenuKey = "None";        // autopilot: hover + altitude hold on / off
+        public string collectiveThumbLeftKey = "None";   // yaw trim left
+        public string collectiveThumbRightKey = "None";  // yaw trim right
 
         // SOI (works the same in every aircraft, separately from the thumbstick bindings).
         public string soiPrevKey = "None";        // switch SOI left
@@ -115,6 +119,15 @@ namespace VirtualJoystick
         public string batteryOnKey = "None";
         public string batteryOffKey = "None";
         public string batteryToggleKey = "None";
+        // Helicopter power lever (engine governor): up / down while held, and off / idle / flight presets.
+        public string powerUpKey = "None";
+        public string powerDownKey = "None";
+        public string powerFlyKey = "None";
+        public string powerIdleKey = "None";
+        public string powerOffKey = "None";
+        public string rotorBrakeOnKey = "None";
+        public string rotorBrakeOffKey = "None";
+        public string rotorBrakeToggleKey = "None";
 
         // Aircraft controls.
         public string canopyOpenKey = "None";

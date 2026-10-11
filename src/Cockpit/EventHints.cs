@@ -37,13 +37,31 @@ namespace VirtualJoystick.Cockpit
             { "VehicleInputManager.SetThrottleThumbstick", "Throttle thumbstick: SOI switch / VTOL nozzles / thumb rudder" },
             { "VehicleInputManager.SetVirtualBrakes", "Wheel brakes" },
             { "VehicleInputManager.SetJoystickPYR", "Flight controls" },
+            { "CountermeasureManager.FireCM", "Countermeasures" },
+            { "CountermeasureManager.StopFireCM", "Countermeasures" },
+            { "AutoCMS.StartCMS", "Countermeasures (CMS program)" },
+            { "AutoCMS.StopCMS", "Countermeasures (CMS program)" },
+            { "AdvancedRadarController.OnElevationInputAxisY", "Radar elevation" },
             // AH-94 combat collective (its trigger is the modifier)
             { "AH94CollectiveFunctions.CombatOnTriggerDown", "MODIFIER (hold): menu → countermeasures, thumbstick → gun pod aim" },
             { "AH94CollectiveFunctions.CombatMenuButtonDown", "Switch SOI · with trigger held: countermeasures" },
             { "AH94CollectiveFunctions.CombatOnSetThumbstick", "SOI control · with trigger held: aim articulating gun pod" },
-            { "AH94CollectiveFunctions.CombatOnStickPressDown", "Gun pod: back to auto aim" },
-            { "AH94CollectiveFunctions.FlightMenuButtonDown", "Flight collective menu" },
-            { "AH94CollectiveFunctions.OnFlightCollectiveThumbstick", "Flight collective thumbstick" },
+            { "AH94CollectiveFunctions.CombatOnStickPressDown", "SOI select (thumbstick press) · with trigger held: gun pod back to auto aim" },
+            { "AH94CollectiveFunctions.CombatOnStickPressUp", "SOI select (thumbstick press)" },
+            { "AH94CollectiveFunctions.CombatOnStickPressed", "SOI select (thumbstick press)" },
+            { "AH94CollectiveFunctions.CombatOnResetThumbstick", "SOI control" },
+            { "AH94CollectiveFunctions.CombatMenuButtonUp", "Switch SOI · with trigger held: countermeasures" },
+            { "AH94CollectiveFunctions.FlightMenuButtonDown", "Autopilot: hover + altitude hold on / off" },
+            { "AH94CollectiveFunctions.OnFlightCollectiveThumbstick", "Yaw trim (or thumb rudder, if set in the game's options)" },
+            // Helicopter cyclic / gunner grip
+            { "HelicopterRotor.ShiftTrimRPx", "Cyclic trim" },
+            { "VTNetworkVoicePTT.StartVoice", "Team radio (push to talk)" },
+            { "VTNetworkVoicePTT.StopVoice", "Team radio (push to talk)" },
+            { "AH94TEDACFunctions.SetRightThumbstick", "TEDAC: slew sensor" },
+            { "AH94TEDACFunctions.OnThumbstickUp", "TEDAC: slew sensor" },
+            // AH-6 (mod) trim
+            { "LB_TrimExtensions.ThumbstickDown", "Trim: tap = reset, hold = trim to stick, double tap = lock" },
+            { "LB_TrimExtensions.ThumbstickUp", "Trim: tap = reset, hold = trim to stick, double tap = lock" },
             // EF-24 HOTAS (rear seat left stick trigger is the modifier)
             { "EF24Hotas.OnJoyMenuButtonDown", "Cycle weapons (EW mode: cycle transmitters)" },
             { "EF24Hotas.OnJoyTriggerDown", "Trigger: fire / EW transmit" },
@@ -57,7 +75,8 @@ namespace VirtualJoystick.Cockpit
         private static bool Ignored(string type, string method) =>
             type.IndexOf("Sync", StringComparison.Ordinal) >= 0
             || type == "VRJoystick" || type == "VRThrottle" || type == "VRInteractable"
-            || method.StartsWith("Haptic", StringComparison.Ordinal);
+            || method.StartsWith("Haptic", StringComparison.Ordinal)
+            || (type == "LB_TrimExtensions" && method == "OnThumbstickAxis");   // AH-6: only stops a trim in progress
 
         public static string Describe(params UnityEventBase[] events)
         {
@@ -78,6 +97,18 @@ namespace VirtualJoystick.Cockpit
                 }
             }
             return parts.Count == 0 ? null : string.Join(" · ", parts);
+        }
+
+        // Whether the event does anything besides play a sound. Mod aircraft keep stock switches under hidden panels,
+        // some still wired (F-22 radar power) and some wired to nothing (F-16 "Left Engine").
+        public static bool IsWired(UnityEventBase e)
+        {
+            if (e == null)
+                return false;
+            foreach (var (type, method) in Listeners(e))
+                if (type != "AudioSource" && !Ignored(type, method))
+                    return true;
+            return false;
         }
 
         // Whether any listener's method name contains the given text.

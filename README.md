@@ -67,6 +67,39 @@ A short, fixed set of keyboard bindings that apply to every aircraft:
   cycle (default `~`; works in every TGP mode including HEAD, and when the TGP isn't the SOI).
 - **PILOT**: helmet visor and night vision (on/off/toggle).
 
+**Helicopters** (AH-94, and the AH-6 Little Bird mod, which is built from AH-94 parts): the same keys work, mapped
+to the helicopter's grips:
+
+- **Right hand** = the cyclic (trigger fires, A cycles weapons, B is team radio push-to-talk, thumbstick is cyclic
+  trim; AH-6 thumbstick press: tap resets trim, hold trims to the stick, double tap locks trim). In the AH-94 front
+  seat this is the cyclic, not the gunner's TEDAC grip.
+- **Left hand** = the collective's combat grip. Its trigger is the game's modifier and works as one: menu switches the
+  SOI, or fires countermeasures with the trigger held; the thumbstick moves the SOI cursor, or aims the gun pod with
+  the trigger held (AH-6: zooms the TGP / map); press selects, or puts the gun pod back to auto aim with the trigger held.
+- **Throttle keys** move the flight collective (up = more lift); full and MIL take it to the top, zero to the bottom.
+- **Collective flight grip** (new card under LEFT HAND): menu = autopilot hover + altitude hold on/off, thumbstick
+  left/right = yaw trim.
+- **ENGINE**: engine 1 / 2 are the starter switches, APU is the "Auxilliary Power" switch (both spring back to the
+  centre in the cockpit; on / off push them that way, toggle alternates). New **Power lever** card (up / down while held,
+  flight / idle / off) and **Rotor brake** card (on / off / toggle).
+- Countermeasures (`X`), master arm (ARM / SAFE buttons), landing gear, parking brake, weapon wheel and TGP zoom work
+  as in the jets. Switching seats in the AH-94 rescans the controls automatically.
+
+**Mod aircraft** (checked against A-10D, F-16C, SU-47M, F-22A, F-5E and AV-8B): the keys work the same, with these
+differences:
+
+- **F-16C**: APU keys run the JFS (on = START 1, off = OFF); the hook is the "Emergency Hook" switch; flaps are automatic
+  (no flaps card). RWR keys switch the display, as its RWR switch is a power switch, not a mode switch.
+- **F-22A**: engine 1 / 2 keys turn the engine selector to L / R and press the start button (on / off only press it when
+  the engine isn't already in that state). Flaps down / up = the flaps override (full flaps) / automatic flaps.
+- **F-5E**: canopy keys unlock the canopy and swing it open, or close and lock it.
+- **A-10D**: APU keys use the "APU Start" switch; RWR keys move the RWR power switch (off / on / mute).
+- **SU-47M**: RWR keys switch the display directly (its RWR switch toggles the MFD page).
+- **AV-8B**: engine 1 = its only engine; the nozzles are the TILT keys.
+
+Mod aircraft often keep stock cockpit switches under hidden panels. Visible controls are always used first, and a hidden
+one only when it's wired to something.
+
 Aircraft controls are found by the game's own control names (e.g. "Landing Gear"); a card says
 "not in this aircraft" when the current jet doesn't have one. Opening an aircraft card marks that
 control in the cockpit with a green ring, joined to its card by a line. Keys used in more than one place show in yellow.

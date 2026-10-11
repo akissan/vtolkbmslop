@@ -688,6 +688,12 @@ namespace VirtualJoystick
                     B("Down", s => s.throttleThumbDownKey, (s, v) => s.throttleThumbDownKey = v, () => Dir("down", Cockpit.KeyActions.HintLeftThumb())),
                     B("Press", s => s.throttleThumbPressKey, (s, v) => s.throttleThumbPressKey = v, Cockpit.KeyActions.HintLeftPress),
                 } },
+                new BindCard { Title = "Collective flight grip", Available = () => Cockpit.KeyActions.Heli != null, Binds = new[]
+                {
+                    B("Menu button", s => s.collectiveMenuKey, (s, v) => s.collectiveMenuKey = v, Cockpit.KeyActions.HintCollectiveMenu),
+                    B("Thumbstick left", s => s.collectiveThumbLeftKey, (s, v) => s.collectiveThumbLeftKey = v, () => Dir("left", Cockpit.KeyActions.HintCollectiveThumb())),
+                    B("Thumbstick right", s => s.collectiveThumbRightKey, (s, v) => s.collectiveThumbRightKey = v, () => Dir("right", Cockpit.KeyActions.HintCollectiveThumb())),
+                } },
             } },
             new BindSection { Title = "SOI", Cards = new[]
             {
@@ -722,10 +728,10 @@ namespace VirtualJoystick
             } },
             new BindSection { Title = "ENGINE", Cards = new[]
             {
-                OnOff("Engine 1 (left)", Cockpit.KeyActions.Engine1,
+                OnOff("Engine 1 (left) / starter", Cockpit.KeyActions.Engine1,
                     s => s.engine1OnKey, (s, v) => s.engine1OnKey = v, s => s.engine1OffKey, (s, v) => s.engine1OffKey = v,
                     s => s.engine1ToggleKey, (s, v) => s.engine1ToggleKey = v),
-                OnOff("Engine 2 (right)", Cockpit.KeyActions.Engine2,
+                OnOff("Engine 2 (right) / starter", Cockpit.KeyActions.Engine2,
                     s => s.engine2OnKey, (s, v) => s.engine2OnKey = v, s => s.engine2OffKey, (s, v) => s.engine2OffKey = v,
                     s => s.engine2ToggleKey, (s, v) => s.engine2ToggleKey = v),
                 OnOff("APU", Cockpit.KeyActions.Apu,
@@ -734,6 +740,19 @@ namespace VirtualJoystick
                 OnOff("Main battery", Cockpit.KeyActions.Battery,
                     s => s.batteryOnKey, (s, v) => s.batteryOnKey = v, s => s.batteryOffKey, (s, v) => s.batteryOffKey = v,
                     s => s.batteryToggleKey, (s, v) => s.batteryToggleKey = v),
+                new BindCard { Title = "Power lever (helicopter)", Available = () => Cockpit.KeyActions.PowerLever != null,
+                    Locate = () => Cockpit.KeyActions.PowerLever != null ? Cockpit.KeyActions.PowerLever.transform.position : (Vector3?)null,
+                    Binds = new[]
+                {
+                    B("Power up", s => s.powerUpKey, (s, v) => s.powerUpKey = v),
+                    B("Power down", s => s.powerDownKey, (s, v) => s.powerDownKey = v),
+                    B("Flight (full)", s => s.powerFlyKey, (s, v) => s.powerFlyKey = v),
+                    B("Idle", s => s.powerIdleKey, (s, v) => s.powerIdleKey = v),
+                    B("Off", s => s.powerOffKey, (s, v) => s.powerOffKey = v),
+                } },
+                OnOff("Rotor brake", Cockpit.KeyActions.RotorBrake,
+                    s => s.rotorBrakeOnKey, (s, v) => s.rotorBrakeOnKey = v, s => s.rotorBrakeOffKey, (s, v) => s.rotorBrakeOffKey = v,
+                    s => s.rotorBrakeToggleKey, (s, v) => s.rotorBrakeToggleKey = v),
             } },
             new BindSection { Title = "AIRCRAFT", Cards = new[]
             {

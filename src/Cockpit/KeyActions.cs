@@ -10,8 +10,12 @@ namespace VirtualJoystick.Cockpit
     // Keyboard bindings (Bindings tab): every button of the two hand controllers the game models, and a few named
     // aircraft controls. Keys are global (VirtualJoystickSettings) and work in any aircraft / seat:
     //  - right hand = the nearest active stick/throttle on the pilot's right (normally the flight stick),
-    //  - left hand = the nearest one on the left (throttle, helicopter collective, or the EF-24 rear seat's left stick).
-    // The left hand's trigger is the game's "modifier" on some seats (AH-94 combat collective, EF-24 rear seat).
+    //  - left hand = the nearest one on the left (throttle, or the EF-24 rear seat's left stick).
+    // Helicopters (AH-94, and mods built on its parts such as the AH-6) are found by their AH94CollectiveFunctions: the
+    // left hand is the collective's combat grip (trigger = modifier, menu = SOI / countermeasures, thumbstick = MFD
+    // cursor / gun pod aim), the throttle keys move the flight collective, and the flight grip's own buttons (autopilot
+    // hover hold, yaw trim) get keys of their own. The right hand is the cyclic, not the AH-94 gunner's TEDAC grip.
+    // The left hand's trigger is the game's "modifier" on some seats (helicopter combat grip, EF-24 rear seat).
     // Works whether or not the virtual joystick is on; stick pitch/roll/rudder keys are handled by the virtual joystick.
     internal static class KeyActions
     {
@@ -23,15 +27,24 @@ namespace VirtualJoystick.Cockpit
             public readonly string Side;
             public VRJoystick Stick;
             public VRThrottle Throttle;
+            public string Label;   // names the device when the type alone doesn't (helicopter grips)
 
             public Hand(string side) { Side = side; }
 
             public bool Present => Stick != null || Throttle != null;
 
+            public void Clear()
+            {
+                Stick = null;
+                Throttle = null;
+                Label = null;
+            }
+
             public string DeviceName
             {
                 get
                 {
+                    if (Label != null && Present) return Label;
                     if (Stick != null) return "stick";
                     if (Throttle == null) return null;
                     return Throttle.name.IndexOf("collective", StringComparison.OrdinalIgnoreCase) >= 0 ? "collective" : "throttle";
@@ -103,18 +116,27 @@ namespace VirtualJoystick.Cockpit
                 _trigger = _menu = _second = _press = _thumbActive = false;
             }
 
-            // The click fires on press; the axis follows from Update (ramped).
+            // The click fires on press; the axis follows from Update (ramped). The controller's own "trigger is down"
+            // flag is set too: the helicopter combat grip reads it (IsTriggerPressed) as the modifier for its other buttons.
             private void TriggerDown()
             {
                 _triggerAxis = 0f;
+                SetTriggerFlag(true);
                 (Stick != null ? Stick.OnTriggerDown : Throttle.OnTriggerDown)?.Invoke();
             }
 
             private void TriggerUp()
             {
                 _triggerAxis = 0f;
+                SetTriggerFlag(false);
                 Invoke(Stick != null ? Stick.OnTriggerAxis : Throttle.OnTriggerAxis, 0f);
                 (Stick != null ? Stick.OnTriggerUp : Throttle.OnTriggerUp)?.Invoke();
+            }
+
+            private void SetTriggerFlag(bool down)
+            {
+                if (Stick != null) StickTriggerPressed?.SetValue(Stick, down);
+                else ThrottleTriggerDown?.SetValue(Throttle, down);
             }
 
             private void ResetThumb()
@@ -130,19 +152,34 @@ namespace VirtualJoystick.Cockpit
 
         public static readonly Hand Right = new Hand("right");
         public static readonly Hand Left = new Hand("left");
+        // Helicopters: the flight collective's grip (menu = autopilot hover hold, thumbstick left/right = yaw trim).
+        public static readonly Hand FlightGrip = new Hand("collective");
+
+        private static readonly FieldInfo ThrottleTriggerDown = AccessTools.Field(typeof(VRThrottle), "triggerIsDown");
+        private static readonly FieldInfo StickTriggerPressed = AccessTools.Field(typeof(VRJoystick), "_triggerPressed");
 
         // ------------------------------------------------------------------ named aircraft controls
 
         // An aircraft control found by the game's control name. Levers and detented rotaries both have states.
-        // A guarded switch (under a VRSwitchCover) gets its cover lifted before it's moved off state 0.
+        // A guarded switch (under a VRSwitchCover) gets its cover lifted before it's moved off its off state.
+        // A three-way switch that springs back to its centre (AH-94 starters and APU: 0 = off, 2 = on) is "on" at its
+        // last position; as it always rests in the centre, toggle remembers which way it was last pushed.
+        // Off is state 0 and on is state 1 unless the matched name says otherwise (Map): the F-16 JFS rests in the
+        // centre, the F-22 flaps override is on at 0. Mod aircraft also bring two kinds that aren't levers: a canopy
+        // that's a door handle (F-5E, AllowDoor) and engines started by a selector and a button (F-22, UseSelector).
         public class NamedControl
         {
             public readonly string Title;
             private readonly string[] _names;
+            private readonly Dictionary<string, (int off, int on)> _maps = new Dictionary<string, (int, int)>(StringComparer.OrdinalIgnoreCase);
+            private int _minStates;
+            private bool _allowDoor;
             public VRInteractable Interactable;
             private VRLever _lever;
             private VRTwistKnobInt _knob;
             private VRSwitchCover _cover;
+            private (int off, int on)? _map;
+            private bool _lastOn;
 
             public NamedControl(string title, params string[] names)
             {
@@ -150,29 +187,171 @@ namespace VirtualJoystick.Cockpit
                 _names = names;
             }
 
-            public bool Found => Interactable != null && (_lever != null || _knob != null);
+            // Off / on states for a control of this name (which must also be one of the names).
+            public NamedControl Map(string name, int off, int on)
+            {
+                _maps[name] = (off, on);
+                return this;
+            }
+
+            // Only controls with at least this many positions (RWR: a mode switch, not a power switch).
+            public NamedControl MinStates(int n)
+            {
+                _minStates = n;
+                return this;
+            }
+
+            // Fall back to a door handle (VRDoor) of this name when there's no lever.
+            public NamedControl AllowDoor()
+            {
+                _allowDoor = true;
+                return this;
+            }
+
+            public bool Found => Interactable != null && (_lever != null || _knob != null || _door != null);
             public Vector3 Position => Interactable != null ? Interactable.transform.position : Vector3.zero;
-            public int State => _lever != null ? _lever.currentState : _knob != null ? _knob.currentState : 0;
-            public int States => _lever != null ? _lever.states : _knob != null ? _knob.states : 0;
+            public int State => _engine != null ? (_engine.engineEnabled ? 1 : 0) : _door != null ? (DoorOpen ? 1 : 0)
+                              : _lever != null ? _lever.currentState : _knob != null ? _knob.currentState : 0;
+            public int States => _engine != null || _door != null ? 2 : _lever != null ? _lever.states : _knob != null ? _knob.states : 0;
+
+            private bool SpringCentre => _map == null && _engine == null && _lever != null && _lever.springTo && _lever.states >= 3
+                                         && _lever.springToIdx > 0 && _lever.springToIdx < _lever.states - 1;
+            private int OffState => _map?.off ?? 0;
+            private int OnState => _map?.on ?? (SpringCentre ? States - 1 : 1);
 
             // e.g. "'Landing Gear' lever, 2 positions (now 2)"
-            public string Describe() => !Found ? null :
-                $"'{Interactable.GetControlReferenceName()}' {(_lever != null ? "lever" : "rotary")}, {States} positions (now {State + 1})";
+            public string Describe()
+            {
+                if (!Found)
+                    return null;
+                string name = Interactable.GetControlReferenceName();
+                if (_engine != null)
+                    return $"'{name}' selector and '{_startButton.GetControlReferenceName()}' button (engine {(_engine.engineEnabled ? "on" : "off")})";
+                if (_door != null)
+                    return $"'{name}' handle ({(DoorOpen ? "open" : "closed")})";
+                return $"'{name}' {(_lever != null ? "lever" : "rotary")}, {States} positions (now {State + 1})"
+                       + (SpringCentre ? ", springs to centre" : "");
+            }
+
+            public void On()
+            {
+                if (_engine != null) { if (!_engine.engineEnabled) PressStart(); }
+                else Set(OnState);
+                _lastOn = true;
+            }
+
+            public void Off()
+            {
+                if (_engine != null) { if (_engine.engineEnabled) PressStart(); }
+                else Set(OffState);
+                _lastOn = false;
+            }
+
+            public void ToggleOnOff()
+            {
+                if (_engine != null) PressStart();
+                else if (!SpringCentre) Toggle();
+                else if (_lastOn) Off();
+                else On();
+            }
 
             public void Set(int state)
             {
                 if (!Found)
                     return;
                 state = Mathf.Clamp(state, 0, States - 1);
-                if (state != 0)
+                if (_door != null)
+                {
+                    _doorTarget = state;
+                    return;
+                }
+                if (_engine != null)
+                {
+                    if (state == 1) On(); else Off();
+                    return;
+                }
+                if (state != OffState)
                     OpenCover();
                 if (_lever != null) _lever.RemoteSetState(state);
                 else _knob.RemoteSetState(state);
             }
 
-            public void Step(int delta) => Set(State + delta);
+            // +1 = one step toward on (flaps down), whichever way the states run.
+            public void Step(int delta) => Set(State + (OnState >= OffState ? delta : -delta));
             public void Cycle() => Set(States > 0 ? (State + 1) % States : 0);
-            public void Toggle() => Set(State == 0 ? 1 : 0);
+            public void Toggle() => Set(State == OffState ? OnState : OffState);
+
+            // ---- F-22 engines: a three-way selector (left / none / right) picks the engine, the button toggles it on
+            // or off, and the selector goes back to the centre on its own.
+            private ModuleEngine _engine;
+            private VRInteractable _startButton;
+            private int _selectState;
+
+            public void UseSelector(VRLever selector, int selectState, VRInteractable startButton, ModuleEngine engine)
+            {
+                Interactable = selector.GetComponent<VRInteractable>();
+                _lever = selector;
+                _knob = null;
+                _cover = null;
+                _door = null;
+                _map = null;
+                _selectState = selectState;
+                _startButton = startButton;
+                _engine = engine;
+            }
+
+            private void PressStart()
+            {
+                Guard(Title, () => _lever.RemoteSetState(_selectState));
+                PressButton(_startButton, Title);
+            }
+
+            // ---- Canopy that's a door handle (F-5E): a lock knob unlocks it, then the handle swings it open. Moved a
+            // little every frame, as a hand would, so the canopy animates.
+            private const float DoorRate = 0.4f;   // of full travel per second
+            private VRDoor _door;
+            private VRInteractable _doorLock;
+            private int? _doorTarget;
+            private float _doorPos;
+            private bool _doorMoving;
+
+            private bool DoorOpen => _door.maxDoorAngle > 0f && _door.currentAngle / _door.maxDoorAngle > 0.5f;
+
+            public void UpdateDoor(float dt)
+            {
+                if (_door == null || !_doorTarget.HasValue)
+                    return;
+                float target = _doorTarget.Value;
+                if (!_doorMoving)
+                {
+                    _doorMoving = true;
+                    _doorPos = _door.maxDoorAngle > 0f ? Mathf.Clamp01(_door.currentAngle / _door.maxDoorAngle) : 0f;
+                    if (target > 0f)
+                        SetDoorLock(1);
+                }
+                _doorPos = Mathf.MoveTowards(_doorPos, target, DoorRate * dt);
+                float p = _doorPos;
+                Guard(Title, () => _door.RemoteSetState(p));
+                if (!Mathf.Approximately(_doorPos, target))
+                    return;
+                if (target == 0f)
+                {
+                    // Lock it again, then settle it so the handle latches.
+                    SetDoorLock(0);
+                    Guard(Title, () => _door.RemoteSetState(0f));
+                }
+                _doorTarget = null;
+                _doorMoving = false;
+            }
+
+            private void SetDoorLock(int s)
+            {
+                var lockLever = _doorLock != null ? _doorLock.GetComponent<VRLever>() : null;
+                var lockKnob = _doorLock != null ? _doorLock.GetComponent<VRTwistKnobInt>() : null;
+                if (lockLever != null) Guard(Title, () => lockLever.RemoteSetState(s));
+                else if (lockKnob != null) Guard(Title, () => lockKnob.RemoteSetState(s));
+                else Guard(Title, () => _door.SetUnlocked(s));
+            }
 
             // The cover enables its switch only when it's open; which of its positions that is varies, so try each.
             private void OpenCover()
@@ -188,47 +367,120 @@ namespace VirtualJoystick.Cockpit
             }
 
             // The nearest match to the pilot's head, so two-seaters get this seat's control ("Master Arm (Front)").
+            // Visible controls first (exact name, then a word in the name); then hidden ones, but only if they're
+            // wired to something: mod aircraft keep stock switches under hidden panels, often wired to nothing.
+            // "Visible" is the GameObject: a switch under a closed cover has its VRInteractable disabled.
             public void Find(VRInteractable[] all, VRSwitchCover[] covers, Vector3 head)
             {
                 Interactable = null;
                 _lever = null;
                 _knob = null;
                 _cover = null;
-                foreach (bool exact in new[] { true, false })
+                _map = null;
+                _lastOn = false;
+                _engine = null;
+                _startButton = null;
+                _door = null;
+                _doorLock = null;
+                _doorTarget = null;
+                _doorMoving = false;
+                foreach (bool visible in new[] { true, false })
                 {
-                    float best = float.MaxValue;
-                    foreach (var vi in all)
+                    foreach (bool exact in new[] { true, false })
                     {
-                        string n = vi.GetControlReferenceName();
-                        if (string.IsNullOrEmpty(n) || !Matches(n, exact) || vi.GetComponent<VRSwitchCover>() != null)
-                            continue;
-                        var lever = vi.GetComponent<VRLever>();
-                        var knob = vi.GetComponent<VRTwistKnobInt>();
-                        if (lever == null && knob == null)
-                            continue;
-                        float d = (vi.transform.position - head).sqrMagnitude;
-                        if (d >= best)
-                            continue;
-                        best = d;
-                        Interactable = vi;
-                        _lever = lever;
-                        _knob = knob;
+                        float best = float.MaxValue;
+                        foreach (var vi in all)
+                        {
+                            if (vi == null || vi.gameObject.activeInHierarchy != visible)
+                                continue;
+                            string n = vi.GetControlReferenceName();
+                            if (string.IsNullOrEmpty(n) || !Matches(n, exact) || vi.GetComponent<VRSwitchCover>() != null)
+                                continue;
+                            var lever = vi.GetComponent<VRLever>();
+                            var knob = vi.GetComponent<VRTwistKnobInt>();
+                            if (lever == null && knob == null)
+                                continue;
+                            if ((lever != null ? lever.states : knob.states) < _minStates)
+                                continue;
+                            if (!visible && !EventHints.IsWired(lever != null ? (UnityEventBase)lever.OnSetState : knob.OnSetState))
+                                continue;
+                            float d = (vi.transform.position - head).sqrMagnitude;
+                            if (d >= best)
+                                continue;
+                            best = d;
+                            Interactable = vi;
+                            _lever = lever;
+                            _knob = knob;
+                        }
+                        if (Interactable != null)
+                            break;
                     }
                     if (Interactable != null)
                         break;
                 }
-                if (Interactable != null)
-                    foreach (var c in covers)
-                        if (c != null && c.coveredSwitch == Interactable)
-                            _cover = c;
+                if (Interactable == null)
+                {
+                    if (_allowDoor)
+                        FindDoor(all, head);
+                    return;
+                }
+                foreach (var c in covers)
+                    if (c != null && c.coveredSwitch == Interactable)
+                        _cover = c;
+                string name = Interactable.GetControlReferenceName().Trim();
+                if (_maps.TryGetValue(name, out var m))
+                    _map = m;
+            }
+
+            // A visible door handle of this name, and the knob or lever that unlocks it (wired to its SetUnlocked).
+            private void FindDoor(VRInteractable[] all, Vector3 head)
+            {
+                float best = float.MaxValue;
+                foreach (var vi in all)
+                {
+                    if (vi == null || !vi.gameObject.activeInHierarchy)
+                        continue;
+                    string n = vi.GetControlReferenceName();
+                    var door = vi.GetComponent<VRDoor>();
+                    if (door == null || string.IsNullOrEmpty(n) || !Matches(n, true))
+                        continue;
+                    float d = (vi.transform.position - head).sqrMagnitude;
+                    if (d < best)
+                    {
+                        best = d;
+                        Interactable = vi;
+                        _door = door;
+                    }
+                }
+                if (_door == null)
+                    return;
+                best = float.MaxValue;
+                foreach (var vi in all)
+                {
+                    if (vi == null)
+                        continue;
+                    var lever = vi.GetComponent<VRLever>();
+                    var knob = vi.GetComponent<VRTwistKnobInt>();
+                    UnityEventBase e = lever != null ? (UnityEventBase)lever.OnSetState : knob != null ? knob.OnSetState : null;
+                    if (e == null || !EventHints.HasListener(e, "SetUnlocked"))
+                        continue;
+                    float d = (vi.transform.position - _door.transform.position).sqrMagnitude;
+                    if (d < best)
+                    {
+                        best = d;
+                        _doorLock = vi;
+                    }
+                }
             }
 
             private bool Matches(string name, bool exact) => NameMatches(_names, name, exact);
         }
 
-        // Exact also allows a seat suffix ("Engine R (Front)"), so both seats' copies compete on distance.
+        // Exact also allows a seat suffix ("Engine R (Front)"), so both seats' copies compete on distance. Not exact:
+        // the name contains one of ours starting at a word ("APU Start" has "APU", "Catapult T/O Trim" doesn't).
         private static bool NameMatches(string[] names, string name, bool exact)
         {
+            name = name.Trim();
             if (exact && name.EndsWith(")"))
             {
                 int open = name.LastIndexOf(" (", StringComparison.Ordinal);
@@ -236,9 +488,28 @@ namespace VirtualJoystick.Cockpit
                     return true;
             }
             foreach (var n in names)
-                if (exact ? string.Equals(name, n, StringComparison.OrdinalIgnoreCase) : name.IndexOf(n, StringComparison.OrdinalIgnoreCase) >= 0)
+                if (exact ? string.Equals(name, n, StringComparison.OrdinalIgnoreCase) : ContainsWord(name, n))
                     return true;
             return false;
+        }
+
+        // A word starts after a non-letter or at a lower-to-upper case change ("MainBattery").
+        private static bool ContainsWord(string s, string word)
+        {
+            for (int i = s.IndexOf(word, StringComparison.OrdinalIgnoreCase); i >= 0;
+                 i = i + 1 < s.Length ? s.IndexOf(word, i + 1, StringComparison.OrdinalIgnoreCase) : -1)
+                if (i == 0 || !char.IsLetter(s[i - 1]) || (char.IsLower(s[i - 1]) && char.IsUpper(s[i])))
+                    return true;
+            return false;
+        }
+
+        // A VR finger push: VRButton listens to OnInteract / OnStopInteract only.
+        private static void PressButton(VRInteractable v, string what)
+        {
+            if (v == null)
+                return;
+            Guard(what, () => v.OnInteract?.Invoke());
+            Guard(what, () => v.OnStopInteract?.Invoke());
         }
 
         // A push button found by the game's control name (exact, seat suffix allowed), nearest to the pilot's head.
@@ -252,15 +523,7 @@ namespace VirtualJoystick.Cockpit
             public bool Found => Interactable != null;
             public Vector3 Position => Interactable != null ? Interactable.transform.position : Vector3.zero;
 
-            // A VR finger push: VRButton listens to OnInteract / OnStopInteract only.
-            public void Press()
-            {
-                if (!Found)
-                    return;
-                var v = Interactable;
-                Guard(_names[0], () => v.OnInteract?.Invoke());
-                Guard(_names[0], () => v.OnStopInteract?.Invoke());
-            }
+            public void Press() => PressButton(Interactable, _names[0]);
 
             public void Find(VRInteractable[] all, Vector3 head)
             {
@@ -281,23 +544,33 @@ namespace VirtualJoystick.Cockpit
             }
         }
 
-        public static readonly NamedControl Flaps = new NamedControl("Flaps", "Flaps");
+        // F-22 (mod): no flaps lever, only the override switch of its automatic flaps (0 = flaps full, 1 = auto).
+        public static readonly NamedControl Flaps = new NamedControl("Flaps", "Flaps", "Flaps Override").Map("Flaps Override", 1, 0);
         public static readonly NamedControl Gear = new NamedControl("Landing gear", "Landing Gear");
         public static readonly NamedControl LaunchBar = new NamedControl("Launch bar", "Launch Bar");
-        public static readonly NamedControl Hook = new NamedControl("Arrestor hook", "Arrestor Hook", "Tail Hook");
+        // F-16 (mod): "Emergency Hook" is its hook switch.
+        public static readonly NamedControl Hook = new NamedControl("Arrestor hook", "Arrestor Hook", "Tail Hook", "Emergency Hook");
         public static readonly NamedControl Radar = new NamedControl("Radar power", "Radar Power");
-        public static readonly NamedControl Engine1 = new NamedControl("Engine 1", "Left Engine", "Engine 1", "Engine L", "Engine");
-        public static readonly NamedControl Engine2 = new NamedControl("Engine 2", "Right Engine", "Engine 2", "Engine R");
-        public static readonly NamedControl Apu = new NamedControl("APU", "APU");
+        // Helicopters have engine starter switches instead of engine switches (fuel is the power lever). Single-engine
+        // jets (F-16, AV-8B mods) have "Engine". The F-22 (mod) starts its engines with a selector and a button.
+        public static readonly NamedControl Engine1 = new NamedControl("Engine 1", "Left Engine", "Engine 1", "Engine L", "Starter Left", "Engine");
+        public static readonly NamedControl Engine2 = new NamedControl("Engine 2", "Right Engine", "Engine 2", "Engine R", "Starter Right");
+        // A-10 (mod): "APU Start". F-16 (mod): the jet fuel starter, 0 = START 2, 1 = OFF, 2 = START 1.
+        public static readonly NamedControl Apu = new NamedControl("APU", "APU", "Auxilliary Power", "Auxiliary Power", "APU Start", "JFS Starter")
+            .Map("JFS Starter", 1, 2);
+        // Helicopters: state 1 = brake on.
+        public static readonly NamedControl RotorBrake = new NamedControl("Rotor brake", "Rotor Brake");
         public static readonly NamedControl Battery = new NamedControl("Main battery", "Main Battery", "Battery");
-        public static readonly NamedControl Canopy = new NamedControl("Canopy", "Canopy");
+        // F-5E (mod): a canopy handle (door) with a lock knob, no lever.
+        public static readonly NamedControl Canopy = new NamedControl("Canopy", "Canopy").AllowDoor();
         public static readonly NamedControl ParkingBrake = new NamedControl("Parking brake", "Brake Locks", "Brake Lock", "Parking Brake");
-        public static readonly NamedControl MasterArm = new NamedControl("Master arm", "Master Arm");
-        // Only some aircraft have an RWR mode lever; the rest switch the RWR display directly (Rwr below).
-        public static readonly NamedControl RwrSwitch = new NamedControl("RWR", "RWR Mode", "RWR");
+        public static readonly NamedControl MasterArm = new NamedControl("Master arm", "Master Arm", "Master Arm Switch");
+        // Only some aircraft have an RWR mode lever; the rest switch the RWR display directly (Rwr below). Three
+        // positions at least: two-way RWR power switches (F-16 mod) or MFD toggles (SU-47 mod) aren't mode levers.
+        public static readonly NamedControl RwrSwitch = new NamedControl("RWR", "RWR Mode", "RWR").MinStates(3);
         // EF-24: EW / WPN knob, state 0 = WPN, 1 = EW.
         public static readonly NamedControl MasterMode = new NamedControl("Master mode (EW / WPN)", "Master Mode");
-        private static readonly NamedControl[] Named = { Flaps, Gear, LaunchBar, Hook, Radar, Engine1, Engine2, Apu, Battery, Canopy, ParkingBrake, MasterArm, RwrSwitch, MasterMode };
+        private static readonly NamedControl[] Named = { Flaps, Gear, LaunchBar, Hook, Radar, Engine1, Engine2, Apu, RotorBrake, Battery, Canopy, ParkingBrake, MasterArm, RwrSwitch, MasterMode };
 
         // Aircraft without a master arm switch (EF-24) have an ARM and a SAFE push button instead.
         public static readonly NamedButton ArmButton = new NamedButton("Master Arm");
@@ -338,6 +611,15 @@ namespace VirtualJoystick.Cockpit
         // AA / AG arming mode: only the EF-24 has one (its HOTAS, one per seat).
         public static VTOLVR.DLC.EW.EF24Hotas Arming { get; private set; }
 
+        // Helicopter: this seat's collective functions (null in fixed-wing aircraft), and its power lever (the engine
+        // governor's throttle limit: 0 = off, the governor's idle notch = idle, 1 = flight).
+        public static VTOLVR.DLC.Rotorcraft.AH94CollectiveFunctions Heli { get; private set; }
+        public static VRThrottle PowerLever { get; private set; }
+        private static float _powerIdle = 0.3f;
+
+        // The lever the throttle keys move: the throttle, or a helicopter's flight collective.
+        private static VRThrottle _lever;
+
         private static readonly FieldInfo NvgEnabled = AccessTools.Field(typeof(HelmetController), "nvgEnabled");
         private static readonly FieldInfo StickRemoteOnly = AccessTools.Field(typeof(VRJoystick), "remoteOnly");
 
@@ -358,18 +640,23 @@ namespace VirtualJoystick.Cockpit
             ReleaseAll();
             _vehicle = null;
             _found = false;
-            Right.Stick = null; Right.Throttle = null;
-            Left.Stick = null; Left.Throttle = null;
+            _rescanAt = 0f;
+            Right.Clear();
+            Left.Clear();
+            FlightGrip.Clear();
             Helmet = null;
             Rwr = null;
             Arming = null;
+            Heli = null;
+            PowerLever = null;
+            _lever = null;
+            PowerKeys.Stop();
             _wheels = new WheelsController[0];
             _cmm = null;
             _muvs = null;
             HasAirbrake = false;
             _airbrakeToggled = _airbrakeApplied = false;
-            _thrTarget = null;
-            _thrDriving = false;
+            ThrottleKeys.Stop();
             Sweep = null;
             _swTarget = null;
             _swDriving = false;
@@ -394,6 +681,11 @@ namespace VirtualJoystick.Cockpit
                 return;
             if (!_found && Time.unscaledTime - _vehicleSince > 1.5f)
                 FindAll();
+            if (_found && _rescanAt > 0f && Time.unscaledTime >= _rescanAt)
+            {
+                _rescanAt = 0f;
+                Rescan();
+            }
             if (!_found)
                 return;
             if (!inputAllowed)
@@ -406,8 +698,11 @@ namespace VirtualJoystick.Cockpit
                          menuHeld: WeaponWheel.MenuHeld(S.weaponCycleKey, _wm, Arming));
             Left.Update(S.throttleTriggerKey, S.throttleMenuKey, S.leftSecondKey, S.throttleThumbLeftKey, S.throttleThumbRightKey,
                         S.throttleThumbDownKey, S.throttleThumbUpKey, S.throttleThumbPressKey, S.throttleTriggerRamp);
-            if (Left.Throttle != null)
-                UpdateThrottleLever(Left.Throttle, Time.deltaTime);
+            FlightGrip.Update("None", S.collectiveMenuKey, "None", S.collectiveThumbLeftKey, S.collectiveThumbRightKey, "None", "None", "None");
+            if (_lever != null)
+                UpdateThrottleLever(_lever, Time.deltaTime);
+            if (PowerLever != null)
+                UpdatePowerLever(PowerLever, Time.deltaTime);
             SoiKeys.Update();
             TiltKeys.Update(Time.deltaTime);
 
@@ -415,8 +710,11 @@ namespace VirtualJoystick.Cockpit
             OnOffToggle(Engine1, S.engine1OnKey, S.engine1OffKey, S.engine1ToggleKey);
             OnOffToggle(Engine2, S.engine2OnKey, S.engine2OffKey, S.engine2ToggleKey);
             OnOffToggle(Apu, S.apuOnKey, S.apuOffKey, S.apuToggleKey);
+            OnOffToggle(RotorBrake, S.rotorBrakeOnKey, S.rotorBrakeOffKey, S.rotorBrakeToggleKey);
             OnOffToggle(Battery, S.batteryOnKey, S.batteryOffKey, S.batteryToggleKey);
             OnOffToggle(Canopy, S.canopyOpenKey, S.canopyCloseKey, S.canopyToggleKey);
+            if (Canopy.Found)
+                Canopy.UpdateDoor(Time.deltaTime);
             OnOffToggle(ParkingBrake, S.parkingBrakeOnKey, S.parkingBrakeOffKey, S.parkingBrakeToggleKey);
             SetWheelBrake(Held(S.wheelBrakeKey), Time.deltaTime);
             if (Pressed(S.airbrakeToggleKey)) _airbrakeToggled = !_airbrakeToggled;
@@ -521,9 +819,9 @@ namespace VirtualJoystick.Cockpit
 
         private static void OnOffToggle(NamedControl c, string onKey, string offKey, string toggleKey)
         {
-            if (Pressed(onKey)) c.Set(1);
-            if (Pressed(offKey)) c.Set(0);
-            if (Pressed(toggleKey)) c.Toggle();
+            if (Pressed(onKey)) c.On();
+            if (Pressed(offKey)) c.Off();
+            if (Pressed(toggleKey)) c.ToggleOnOff();
         }
 
         public static bool HasRwr => Rwr != null || RwrSwitch.Found;
@@ -560,6 +858,7 @@ namespace VirtualJoystick.Cockpit
             SetCountermeasures(false);
             Right.ReleaseAll();
             Left.ReleaseAll();
+            FlightGrip.ReleaseAll();
             SoiKeys.ReleaseAll();
             WeaponWheel.Reset();
         }
@@ -574,16 +873,39 @@ namespace VirtualJoystick.Cockpit
             FindAll();
         }
 
+        // The AH-94 in single player swaps the player between its seats, and with them the active controls: rescan
+        // once the camera has moved to the new seat.
+        private static float _rescanAt;
+        public static void RescanSoon() => _rescanAt = Time.unscaledTime + 0.3f;
+
         private static void FindAll()
         {
             _found = true;
+            _rescanAt = 0f;
             HintCache.Clear();
-            Right.Stick = null; Right.Throttle = null;
-            Left.Stick = null; Left.Throttle = null;
+            Right.Clear();
+            Left.Clear();
+            FlightGrip.Clear();
 
             Camera cam = ScreenPointer.Camera != null ? ScreenPointer.Camera : Camera.main;
             Transform root = _vehicle.transform;
             Vector3 head = root.InverseTransformPoint(cam != null ? cam.transform.position : root.position);
+            Vector3 headWorld = root.TransformPoint(head);
+
+            // Helicopter: this seat's collective (each seat has its own AH94CollectiveFunctions on its flight collective).
+            Heli = null;
+            float bestHeli = float.MaxValue;
+            foreach (var cf in _vehicle.GetComponentsInChildren<VTOLVR.DLC.Rotorcraft.AH94CollectiveFunctions>(false))
+            {
+                if (!cf.isActiveAndEnabled || cf.flightCollective == null || !cf.flightCollective.isActiveAndEnabled)
+                    continue;
+                float d = (cf.flightCollective.transform.position - headWorld).sqrMagnitude;
+                if (d < bestHeli)
+                {
+                    bestHeli = d;
+                    Heli = cf;
+                }
+            }
 
             // Candidates: this seat's active controllers (remote-only sticks belong to the other seat in multicrew).
             float bestR = float.MaxValue, bestL = float.MaxValue;
@@ -591,10 +913,12 @@ namespace VirtualJoystick.Cockpit
             {
                 Vector3 p = root.InverseTransformPoint(c.transform.position) - head;
                 float d = p.sqrMagnitude;
-                // Right hand: prefer a stick (and BYOJ's choice, the side stick, when there are two).
+                // Right hand: prefer a stick (and BYOJ's choice, the side stick, when there are two). In a helicopter,
+                // a stick that doesn't fly (the AH-94 gunner's TEDAC grip) loses its preference to the cyclic.
                 if (p.x >= 0f || (js != null && Mathf.Abs(p.x) < 0.08f))
                 {
-                    float score = d - (js != null ? 1f : 0f) - (js != null && PathHas(c.transform, "side") ? 0.5f : 0f);
+                    float score = d - (js != null ? 1f : 0f) - (js != null && PathHas(c.transform, "side") ? 0.5f : 0f)
+                                  + (Heli != null && js != null && !EventHints.HasListener(js.OnSetStick, "SetJoystickPYR") ? 2f : 0f);
                     if (score < bestR)
                     {
                         bestR = score;
@@ -612,21 +936,59 @@ namespace VirtualJoystick.Cockpit
             foreach (var js in _vehicle.GetComponentsInChildren<VRJoystick>(false))
                 if (js.isActiveAndEnabled && !(StickRemoteOnly != null && (bool)StickRemoteOnly.GetValue(js)))
                     Consider(js, js, null);
-            foreach (var th in _vehicle.GetComponentsInChildren<VRThrottle>(false))
-                if (th.isActiveAndEnabled)
-                    Consider(th, null, th);
+            // A helicopter's levers (collective grips, power lever) are assigned below, not by position.
+            if (Heli == null)
+                foreach (var th in _vehicle.GetComponentsInChildren<VRThrottle>(false))
+                    if (th.isActiveAndEnabled)
+                        Consider(th, null, th);
+
+            _lever = null;
+            PowerLever = null;
+            PowerKeys.Stop();
+            if (Heli != null)
+            {
+                // Left hand: the combat grip (AH-94 rear / AH-6: on top of the collective; AH-94 front: its own grip).
+                var combat = Heli.combatCollective;
+                bool combatOk = combat != null && combat.isActiveAndEnabled;
+                Left.Stick = null;
+                Left.Throttle = combatOk ? combat : Heli.flightCollective;
+                Left.Label = combatOk ? "collective combat grip" : "collective";
+                FlightGrip.Throttle = Heli.flightCollective;
+                FlightGrip.Label = "collective flight grip";
+                _lever = Heli.flightCollective;
+
+                // Power lever: the one wired to the engine governor, in this seat.
+                var governor = _vehicle.GetComponentInChildren<VTOLVR.DLC.Rotorcraft.HeliPowerGovernor>(true);
+                if (governor != null)
+                    _powerIdle = governor.throttleIdleNotch;
+                float bestP = float.MaxValue;
+                foreach (var th in _vehicle.GetComponentsInChildren<VRThrottle>(false))
+                {
+                    if (!th.isActiveAndEnabled || !EventHints.HasListener(th.OnSetThrottle, "SetThrottleLimit"))
+                        continue;
+                    float d = (th.transform.position - headWorld).sqrMagnitude;
+                    if (d < bestP)
+                    {
+                        bestP = d;
+                        PowerLever = th;
+                    }
+                }
+            }
+            else
+                _lever = Left.Throttle;
+            ThrottleKeys.Stop();
 
             Helmet = _vehicle.GetComponentInChildren<HelmetController>(true);
-            SoiKeys.Find(_vehicle, root.TransformPoint(head));
+            SoiKeys.Find(_vehicle, headWorld);
             TiltKeys.Find(_vehicle);
             Sweep = _vehicle.GetComponentInChildren<AeroGeometryLever>(true);
             _swTarget = null;
             _swDriving = false;
             var all = _vehicle.GetComponentsInChildren<VRInteractable>(true);
             var covers = _vehicle.GetComponentsInChildren<VRSwitchCover>(true);
-            Vector3 headWorld = root.TransformPoint(head);
             foreach (var n in Named)
                 n.Find(all, covers, headWorld);
+            FindEngineSelector(all);
             foreach (var b in Buttons)
                 b.Find(all, headWorld);
             _wm = _vehicle.GetComponentInChildren<WeaponManager>(true);
@@ -639,7 +1001,7 @@ namespace VirtualJoystick.Cockpit
 
             var found = new List<string>();
             foreach (var n in Named)
-                found.Add(n.Title + (n.Found ? "" : " (missing)"));
+                found.Add(n.Title + (n.Found ? $" ({n.Describe()})" : " (missing)"));
             if (ArmButton.Found)
                 found.Add("Master arm buttons");
             if (Rwr != null)
@@ -650,8 +1012,40 @@ namespace VirtualJoystick.Cockpit
                 found.Add("Wing sweep");
             if (TiltKeys.Tilt != null)
                 found.Add($"Engine tilt (0-{TiltKeys.Tilt.maxTilt:0}°)");
-            Log.Info($"Key bindings ready in {VehicleName}: right hand {Right.DeviceName ?? "missing"}, left hand {Left.DeviceName ?? "missing"}, " +
+            if (Heli != null)
+                found.Add($"Helicopter collective ({Heli.flightCollective.name}, combat grip {(Left.Throttle != Heli.flightCollective ? Left.Throttle.name : "missing")})");
+            if (PowerLever != null)
+                found.Add($"Power lever ({PowerLever.name}, idle {_powerIdle:0.00})");
+            Log.Info($"Key bindings ready in {VehicleName}: right hand {Right.DeviceName ?? "missing"}" +
+                     $"{(Right.Stick != null ? " (" + Right.Stick.name + ")" : "")}, left hand {Left.DeviceName ?? "missing"}, " +
                      $"helmet {(Helmet != null ? "ok" : "missing")}; {string.Join(", ", found)}");
+        }
+
+        // F-22 (mod): RaptorEngineStart has the engine selector (state 0 = engines[0], 1 = none, 2 = engines[1]) and
+        // the "Motor Toggle" button calls its StartSelectedEngine. Found by type name: the mod's assembly isn't
+        // referenced. Engine 1 is the left one (the one further left in the aircraft).
+        private static void FindEngineSelector(VRInteractable[] all)
+        {
+            foreach (var mb in _vehicle.GetComponentsInChildren<MonoBehaviour>(true))
+            {
+                if (mb == null || mb.GetType().Name != "RaptorEngineStart")
+                    continue;
+                var selector = AccessTools.Field(mb.GetType(), "engineSelectorSwitch")?.GetValue(mb) as VRLever;
+                var engines = AccessTools.Field(mb.GetType(), "engines")?.GetValue(mb) as ModuleEngine[];
+                if (selector == null || engines == null || engines.Length < 2 || engines[0] == null || engines[1] == null)
+                    continue;
+                VRInteractable button = null;
+                foreach (var vi in all)
+                    if (vi != null && vi.GetComponent<VRButton>() != null && EventHints.HasListener(vi.OnInteract, "StartSelectedEngine"))
+                        button = vi;
+                if (button == null)
+                    continue;
+                Transform root = _vehicle.transform;
+                bool firstIsLeft = root.InverseTransformPoint(engines[0].transform.position).x <= root.InverseTransformPoint(engines[1].transform.position).x;
+                Engine1.UseSelector(selector, firstIsLeft ? 0 : 2, button, firstIsLeft ? engines[0] : engines[1]);
+                Engine2.UseSelector(selector, firstIsLeft ? 2 : 0, button, firstIsLeft ? engines[1] : engines[0]);
+                return;
+            }
         }
 
         // ------------------------------------------------------------------ hints for the UI
@@ -667,11 +1061,15 @@ namespace VirtualJoystick.Cockpit
         public static string HintLeftThumb() => Hint(Left, h => h.ThumbEvent);
         public static string HintLeftPress() => Hint(Left, h => h.PressEvent, h => h.PressHeldEvent);
 
+        public static string HintCollectiveMenu() => Hint(FlightGrip, h => h.MenuEvent);
+        public static string HintCollectiveThumb() => Hint(FlightGrip, h => h.ThumbEvent);
+
         public static string HintThrottleMove()
         {
             if (!_found) return null;
-            if (Left.Throttle == null) return Left.Present ? $"(the left {Left.DeviceName} has no throttle travel)" : "(no left controller)";
-            var th = Left.Throttle;
+            if (Heli != null) return "flight collective (up = more lift)";
+            if (_lever == null) return Left.Present ? $"(the left {Left.DeviceName} has no throttle travel)" : "(no left controller)";
+            var th = _lever;
             return th.abGate ? $"{Left.DeviceName}, afterburner detent at {th.abGateThreshold:0.00}" : $"{Left.DeviceName}, no afterburner detent";
         }
 
@@ -703,9 +1101,24 @@ namespace VirtualJoystick.Cockpit
         private const float PresetRate = 2.5f;
         // Throttle keys move the lever this many times faster above the afterburner detent.
         private const float AbGateRateMultiplier = 3f;
-        private static float _thrCmd;
-        private static float? _thrTarget;
-        private static bool _thrDriving;
+
+        // Key-driven lever state: the commanded position, a preset it's travelling to, and whether keys are moving it
+        // (otherwise the lever is left alone, so a hand or another mod can move it).
+        private class LeverKeys
+        {
+            public float Cmd;
+            public float? Target;
+            public bool Driving;
+
+            public void Stop()
+            {
+                Target = null;
+                Driving = false;
+            }
+        }
+
+        private static readonly LeverKeys ThrottleKeys = new LeverKeys();
+        private static readonly LeverKeys PowerKeys = new LeverKeys();
 
         private static void UpdateThrottleLever(VRThrottle th, float dt)
         {
@@ -715,36 +1128,52 @@ namespace VirtualJoystick.Cockpit
 
             // MIL sits just under the afterburner detent (the game counts up to threshold + 0.01 as below it);
             // without a detent there's no afterburner, so MIL is simply the maximum.
-            if (Pressed(S.throttleFullKey)) _thrTarget = max;
-            if (Pressed(S.throttleMilKey)) _thrTarget = th.abGate ? Mathf.Clamp(th.abGateThreshold - 0.005f, min, max) : max;
-            if (Pressed(S.throttleZeroKey)) _thrTarget = min;
+            if (Pressed(S.throttleFullKey)) ThrottleKeys.Target = max;
+            if (Pressed(S.throttleMilKey)) ThrottleKeys.Target = th.abGate ? Mathf.Clamp(th.abGateThreshold - 0.005f, min, max) : max;
+            if (Pressed(S.throttleZeroKey)) ThrottleKeys.Target = min;
+            DriveLever(th, ThrottleKeys, (Held(S.throttleUpKey) ? 1f : 0f) - (Held(S.throttleDownKey) ? 1f : 0f), min, max, dt);
+        }
 
-            float dir = (Held(S.throttleUpKey) ? 1f : 0f) - (Held(S.throttleDownKey) ? 1f : 0f);
+        // Helicopter power lever: off (0), idle (the governor's idle notch), flight (full).
+        private static void UpdatePowerLever(VRThrottle th, float dt)
+        {
+            if (!th.isActiveAndEnabled)
+                return;
+            float min = th.minThrottle, max = Mathf.Clamp01(th.throttleLimiter);
+            if (Pressed(S.powerFlyKey)) PowerKeys.Target = max;
+            if (Pressed(S.powerIdleKey)) PowerKeys.Target = Mathf.Clamp(_powerIdle, min, max);
+            if (Pressed(S.powerOffKey)) PowerKeys.Target = min;
+            DriveLever(th, PowerKeys, (Held(S.powerUpKey) ? 1f : 0f) - (Held(S.powerDownKey) ? 1f : 0f), min, max, dt);
+        }
+
+        // dir: +1 / -1 while an up / down key is held (cancels a preset), 0 to carry on toward k.Target if there is one.
+        private static void DriveLever(VRThrottle th, LeverKeys k, float dir, float min, float max, float dt)
+        {
             if (dir != 0f)
-                _thrTarget = null;
-            if (dir == 0f && !_thrTarget.HasValue)
+                k.Target = null;
+            if (dir == 0f && !k.Target.HasValue)
             {
-                _thrDriving = false;
+                k.Driving = false;
                 return;
             }
-            if (!_thrDriving)
-                _thrCmd = th.currentThrottle;
-            _thrDriving = true;
+            if (!k.Driving)
+                k.Cmd = th.currentThrottle;
+            k.Driving = true;
 
             if (dir != 0f)
             {
                 // Past the afterburner detent (pushing through it, or pulling back out of AB) the lever moves faster.
-                bool pastGate = th.abGate && (dir > 0f ? _thrCmd >= th.abGateThreshold : _thrCmd > th.abGateThreshold);
+                bool pastGate = th.abGate && (dir > 0f ? k.Cmd >= th.abGateThreshold : k.Cmd > th.abGateThreshold);
                 float rate = S.throttleRate * (pastGate ? AbGateRateMultiplier : 1f);
-                _thrCmd = Mathf.Clamp(_thrCmd + dir * rate * dt, min, max);
+                k.Cmd = Mathf.Clamp(k.Cmd + dir * rate * dt, min, max);
             }
             else
             {
-                _thrCmd = Mathf.MoveTowards(_thrCmd, _thrTarget.Value, PresetRate * dt);
-                if (Mathf.Approximately(_thrCmd, _thrTarget.Value))
-                    _thrTarget = null;
+                k.Cmd = Mathf.MoveTowards(k.Cmd, k.Target.Value, PresetRate * dt);
+                if (Mathf.Approximately(k.Cmd, k.Target.Value))
+                    k.Target = null;
             }
-            ThrottleLever.Move(th, _thrCmd, dt);
+            ThrottleLever.Move(th, k.Cmd, dt);
         }
 
         // ------------------------------------------------------------------ wing sweep lever
@@ -882,5 +1311,19 @@ namespace VirtualJoystick.Cockpit
                 Log.Warn($"Key binding ({what}) threw: {e.Message}");
             }
         }
+    }
+
+    // AH-94 single player: switching between the front and rear seat swaps the active controls. Applied by the mod
+    // loader's PatchAll.
+    [HarmonyPatch]
+    internal static class SeatSwitchPatch
+    {
+        private static IEnumerable<MethodBase> TargetMethods()
+        {
+            yield return AccessTools.Method(typeof(AH94PilotSwitcher), nameof(AH94PilotSwitcher.SetToFront));
+            yield return AccessTools.Method(typeof(AH94PilotSwitcher), nameof(AH94PilotSwitcher.SetToRear));
+        }
+
+        private static void Postfix() => KeyActions.RescanSoon();
     }
 }
