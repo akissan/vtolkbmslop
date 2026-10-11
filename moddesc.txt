@@ -1,0 +1,29 @@
+Mouse (Virtual Joystick) + Keyboard controls
+
+Bring controls as close to something like Nuclear Option as possible. Designed to work with FLATSCREEN 3, didn't test much but seems to work with BJOY (in case you want to play mouse + controller for some reason for example)
+
+Features:
+
+Control your aircraft with vIrtual Joystick similar to nuclear option or war thunder one [ press C to enable then hold Left Alt to go in clickable mode to press buttons/switches etc when needed ]
+
+Use WASD for sharp maneuvers, shift-ctrl for controlling throttle and other common keybinds are available. Not all controls are bindable, only what i consider helpful, use BJOY for extra
+
+Control your TGP with mouse like FPS camera [while holding mouse side button]
+
+Cycle your TGP zoom levels [using ~ button] 
+
+Select weapons from list using scroll wheel instead of cycling around (hold R)
+
+Temporary zoom to use your EYEBALLS MK1 [hold Z button]
+
+---
+
+All keybinds and sensitivities are customizable, different components like virtual joystick or weapon manager could be turned off. 
+
+---
+
+Multicrew sync or crashes are not tested yet
+
+---
+
+Claude Code was used HEAVILY, its vibecoded as fuck, like 99% of code, but don't worry i asked him to not make mistakes! Being serious i've reweived code for not doing anything weird in terms of unusual function calls and checked performance (i've got ~2% fps loss on average without any unusual spikes or anything like that). GIthub: https://github.com/akissan/vtolkbmslop
