@@ -253,11 +253,15 @@ namespace VirtualJoystick
         // Debug: tooltip next to the cursor naming the hovered screen element, its hitbox source and size.
         public bool showScreenTooltip = false;
 
-        // Live settings: loaded from FilePath at startup, falling back to the field initializers above for anything the
-        // file doesn't have (no file yet, or settings added since it was written).
-        public static VirtualJoystickSettings Current { get; private set; } = Load();
+        // Live settings: loaded from FilePath on first use, falling back to the field initializers above for anything the
+        // file doesn't have (no file yet, or settings added since it was written). Loaded lazily, not by a static
+        // initializer: those run in declaration order, so one here ran Load before the statics declared below it were
+        // set, and it failed and fell back to defaults on every launch.
+        private static VirtualJoystickSettings _current;
 
-        public static void ResetToDefaults() => Current = new VirtualJoystickSettings();
+        public static VirtualJoystickSettings Current => _current ?? (_current = Load());
+
+        public static void ResetToDefaults() => _current = new VirtualJoystickSettings();
 
         // ---------------------------------------------------------------- persistence
 
@@ -268,9 +272,6 @@ namespace VirtualJoystick
         private static string SettingsPathIn(string folder) =>
             Path.Combine(Path.Combine(Application.persistentDataPath, folder), "settings.json");
 
-        // Folders the settings lived in under the mod's earlier names, newest first.
-        private static readonly string[] OldFolders = { "VirtualJoystick", "MouseStick" };
-
         private static string _savedJson;   // what the file holds, so unchanged settings aren't rewritten
 
         private static VirtualJoystickSettings Load()
@@ -279,8 +280,15 @@ namespace VirtualJoystick
             string path = FilePath;
             try
             {
-                // The mod used to be called Virtual Joystick / Mouse Stick: carry its settings over the first time.
-                foreach (string folder in OldFolders)
+                // A save interrupted between removing the old file and renaming the new one leaves only the temp file.
+                if (!File.Exists(path) && File.Exists(path + ".tmp"))
+                {
+                    File.Move(path + ".tmp", path);
+                    Log.Info("Settings recovered from " + path + ".tmp");
+                }
+                // The mod used to be called Virtual Joystick / Mouse Stick (newest first): carry its settings over the
+                // first time.
+                foreach (string folder in new[] { "VirtualJoystick", "MouseStick" })
                 {
                     string oldPath = SettingsPathIn(folder);
                     if (File.Exists(path) || !File.Exists(oldPath))
@@ -304,7 +312,7 @@ namespace VirtualJoystick
             catch (Exception e)
             {
                 // Keep the broken file for inspection; the next save replaces it.
-                Log.Error("Could not read settings (" + path + "), using defaults: " + e.Message);
+                Log.Error("Could not read settings (" + path + "), using defaults: " + e);
                 settings = new VirtualJoystickSettings();
                 try
                 {
@@ -315,7 +323,22 @@ namespace VirtualJoystick
             return settings;
         }
 
-        // Writes the settings if they differ from what's on disk. Cheap enough to call every second or so.
+        private static bool _changed;   // edited since the last save
+
+        // Called by the settings window when the user edits something; SaveIfMarked writes it.
+        public static void MarkChanged() => _changed = true;
+
+        // Called every frame: saves a pending edit, but not while a slider (or any other IMGUI control) is being
+        // dragged, so a slider is saved once, when it's let go.
+        public static void SaveIfMarked()
+        {
+            if (!_changed || GUIUtility.hotControl != 0)
+                return;
+            _changed = false;
+            SaveIfChanged();
+        }
+
+        // Writes the settings if they differ from what's on disk.
         public static void SaveIfChanged()
         {
             string json;

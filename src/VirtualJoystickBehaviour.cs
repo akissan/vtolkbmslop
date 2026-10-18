@@ -292,18 +292,10 @@ namespace VirtualJoystick
             ShowToast($"FOV reset to {S.savedFov:0}°");
         }
 
-        // Settings only change through the settings window: while it's open, save changes about once a second (closing
-        // it saves too), so a crash loses at most a second of tweaking.
-        private const float SettingsSaveInterval = 1f;
-        private float _nextSettingsSave;
-
         private void Update()
         {
-            if (SettingsWindow.IsOpen && Time.unscaledTime >= _nextSettingsSave)
-            {
-                _nextSettingsSave = Time.unscaledTime + SettingsSaveInterval;
-                VirtualJoystickSettings.SaveIfChanged();
-            }
+            // Settings edited in the settings window: saved right away (sliders once they're let go).
+            VirtualJoystickSettings.SaveIfMarked();
 
             HandleViewRecenter();
 

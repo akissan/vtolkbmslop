@@ -2,8 +2,8 @@ using UnityEngine;
 
 namespace VirtualJoystick
 {
-    // In-game settings window (default F8). Changes apply immediately and last until the game closes
-    // (nothing is saved to disk). While it is open the overlay is shown as a live preview.
+    // In-game settings window (default F8). Changes apply immediately and are saved to disk as they're made (see
+    // VirtualJoystickSettings.SaveIfMarked). While it is open the overlay is shown as a live preview.
     internal static class SettingsWindow
     {
         private const int WindowId = 0x4D53; // "MS"
@@ -74,6 +74,10 @@ namespace VirtualJoystick
         private static void DrawContents(int id)
         {
             var s = VirtualJoystickSettings.Current;
+            // Any control changed this event (slider, checkbox, button) marks the settings for saving; a false alarm
+            // (tab, scrollbar) only costs a compare with what's on disk.
+            bool outerChanged = GUI.changed;
+            GUI.changed = false;
             // Window callbacks run after the rest of OnGUI, so the overlay draws the markers gathered here one
             // frame later: rebuild the list on each Repaint pass.
             if (Event.current.type == EventType.Repaint)
@@ -143,6 +147,7 @@ namespace VirtualJoystick
                     _rebinding = null;
                     KeysChanged = true;
                     InvalidateClashes();
+                    VirtualJoystickSettings.MarkChanged();
                 }
             }
             else if (GUILayout.Button("RESET KEY BINDINGS TO DEFAULTS", Theme.Flush))
@@ -151,12 +156,17 @@ namespace VirtualJoystick
                 _rebinding = null;
                 KeysChanged = true;
                 InvalidateClashes();
+                VirtualJoystickSettings.MarkChanged();
             }
             GUILayout.Space(TabGap);
             if (GUILayout.Button("CLOSE", Theme.Flush))
                 Close();
             GUILayout.Space(Theme.ScrollbarSpace);
             GUILayout.EndHorizontal();
+
+            if (GUI.changed)
+                VirtualJoystickSettings.MarkChanged();
+            GUI.changed |= outerChanged;
 
             GUI.DragWindow();
         }
@@ -572,6 +582,7 @@ namespace VirtualJoystick
             _rebinding = null;
             KeysChanged = true;
             InvalidateClashes();
+            VirtualJoystickSettings.MarkChanged();
         }
 
         // ------------------------------------------------------------------ bindings tab
@@ -962,6 +973,7 @@ namespace VirtualJoystick
             else if (Event.current.type == EventType.MouseDown && Event.current.button == 0 && hover)
             {
                 on = !on;
+                GUI.changed = true;
                 Event.current.Use();
             }
             return v;
@@ -1187,6 +1199,7 @@ namespace VirtualJoystick
             if (Event.current.type == EventType.MouseDown && Event.current.button == 0 && hover)
             {
                 v = !value;
+                GUI.changed = true;
                 Event.current.Use();
             }
             return v;
